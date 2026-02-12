@@ -35,6 +35,10 @@ pub struct BrainConfig {
     /// Monitoring settings.
     #[serde(default)]
     pub monitor: MonitorConfig,
+
+    /// Autonomy / curiosity loop settings.
+    #[serde(default)]
+    pub autonomy: AutonomyConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +196,86 @@ impl Default for MonitorConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutonomyConfig {
+    /// Whether the autonomy loop is enabled.
+    pub enabled: bool,
+    /// How often (ms) the Brain "thinks" about what to do next.
+    pub think_interval_ms: u64,
+    /// Max pending autonomy tasks before pausing submission.
+    pub max_pending_tasks: u32,
+    /// Max LLM tokens per think cycle.
+    pub max_tokens_per_think: u32,
+    /// Temperature for reasoning queries (lower = more focused).
+    pub temperature: f32,
+    /// Which verbs the autonomy loop is allowed to use.
+    pub allowed_verbs: Vec<String>,
+    /// Reward system settings.
+    #[serde(default)]
+    pub reward: RewardConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewardConfig {
+    /// Whether the reward system is enabled.
+    pub enabled: bool,
+    /// Weight for novelty axis in composite score.
+    pub novelty_weight: f32,
+    /// Weight for anomaly axis in composite score.
+    pub anomaly_weight: f32,
+    /// Weight for confidence axis in composite score.
+    pub confidence_weight: f32,
+    /// Weight for actionability axis in composite score.
+    pub actionability_weight: f32,
+    /// Run LLM reflection every N think cycles.
+    pub llm_reflect_every_n_cycles: u32,
+    /// Max tokens for LLM reflection response.
+    pub max_reflection_tokens: u32,
+    /// Number of recent scored tasks to show in scoreboard.
+    pub scoreboard_size: usize,
+    /// Minimum adaptive interval (ms) — fastest think rate.
+    pub adaptive_min_interval_ms: u64,
+    /// Maximum adaptive interval (ms) — slowest think rate.
+    pub adaptive_max_interval_ms: u64,
+    /// EWMA smoothing factor (higher = more responsive to recent scores).
+    pub ewma_alpha: f32,
+    /// Similarity threshold for entity deduplication.
+    pub entity_dedup_threshold: f64,
+}
+
+impl Default for RewardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            novelty_weight: 0.30,
+            anomaly_weight: 0.25,
+            confidence_weight: 0.20,
+            actionability_weight: 0.25,
+            llm_reflect_every_n_cycles: 10,
+            max_reflection_tokens: 512,
+            scoreboard_size: 15,
+            adaptive_min_interval_ms: 20_000,
+            adaptive_max_interval_ms: 300_000,
+            ewma_alpha: 0.3,
+            entity_dedup_threshold: 0.85,
+        }
+    }
+}
+
+impl Default for AutonomyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            think_interval_ms: 60_000,
+            max_pending_tasks: 5,
+            max_tokens_per_think: 1024,
+            temperature: 0.4,
+            allowed_verbs: vec!["IDENTIFY".into(), "MONITOR".into()],
+            reward: RewardConfig::default(),
+        }
+    }
+}
+
 impl BrainConfig {
     /// Load configuration from a TOML file.
     pub fn load(path: &Path) -> Result<Self> {
@@ -223,6 +307,7 @@ impl Default for BrainConfig {
             storage: StorageConfig::default(),
             api: ApiConfig::default(),
             monitor: MonitorConfig::default(),
+            autonomy: AutonomyConfig::default(),
         }
     }
 }

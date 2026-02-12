@@ -109,9 +109,24 @@ impl Storage {
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS task_rewards (
+                task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                novelty REAL NOT NULL DEFAULT 0.0,
+                anomaly REAL NOT NULL DEFAULT 0.0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                actionability REAL NOT NULL DEFAULT 0.0,
+                composite REAL NOT NULL DEFAULT 0.0,
+                scoring_method TEXT NOT NULL DEFAULT 'rule',
+                scoring_detail TEXT NOT NULL DEFAULT '{}',
+                entities_found INTEGER NOT NULL DEFAULT 0,
+                scored_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_cell_id ON tasks(cell_id);
             CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind);
+            CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
+            CREATE INDEX IF NOT EXISTS idx_task_rewards_composite ON task_rewards(composite);
             CREATE INDEX IF NOT EXISTS idx_research_query ON research_results(query);
             ",
         )?;

@@ -309,6 +309,10 @@ pub enum JournalEventKind {
     UpdateProposed,
     UpdateApproved,
     UpdateRejected,
+    AutonomyThinkCycle,
+    AutonomyRewardScored,
+    AutonomyReflection,
+    EntityDiscovered,
     SystemStartup,
     SystemShutdown,
 }

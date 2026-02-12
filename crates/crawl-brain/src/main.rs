@@ -2,6 +2,7 @@
 
 mod api;
 mod config;
+mod curiosity;
 mod engine;
 mod inference;
 mod journal;
@@ -10,6 +11,7 @@ mod monitor;
 mod ollama;
 mod policy;
 mod research;
+mod reward;
 mod sandbox;
 mod scheduler;
 mod storage;
@@ -161,6 +163,9 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         }
     });
 
+    // Clone sender for the curiosity loop before API takes ownership.
+    let curiosity_sender = scheduler_sender.clone();
+
     // Start the gRPC API server.
     let api_handle = tokio::spawn({
         let brain = brain.clone();
@@ -177,6 +182,23 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
             error!("scheduler exited with error: {e}");
         }
     });
+
+    // Start the autonomy / curiosity loop.
+    let curiosity_handle = if brain.config.autonomy.enabled {
+        let loop_ = curiosity::CuriosityLoop::new(
+            brain.clone(),
+            curiosity_sender,
+            shutdown_rx.clone(),
+        );
+        Some(tokio::spawn(async move {
+            if let Err(e) = loop_.run().await {
+                error!("curiosity loop exited with error: {e}");
+            }
+        }))
+    } else {
+        info!("autonomy loop disabled by config");
+        None
+    };
 
     // Wait for shutdown signal.
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -218,6 +240,9 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     monitor_handle.abort();
     api_handle.abort();
     scheduler_handle.abort();
+    if let Some(ref h) = curiosity_handle {
+        h.abort();
+    }
 
     // Wait briefly for abort to propagate.
     let _ = tokio::time::timeout(
@@ -226,6 +251,9 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
             let _ = monitor_handle.await;
             let _ = api_handle.await;
             let _ = scheduler_handle.await;
+            if let Some(h) = curiosity_handle {
+                let _ = h.await;
+            }
         },
     ).await;
 
