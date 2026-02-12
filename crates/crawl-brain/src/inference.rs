@@ -1,6 +1,7 @@
 //! ONNX Runtime inference engine for neural network models.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use parking_lot::RwLock;
 
 use crate::config::BrainConfig;
 
@@ -12,6 +13,8 @@ pub struct InferenceEngine {
     gte_small_available: bool,
     lightlog_available: bool,
     deberta_pi_available: bool,
+    /// Trained statistical model loaded from trainer cell output.
+    trained_model: RwLock<Option<TrainedAnomalyModel>>,
 }
 
 /// Anomaly score from a neural network model.
@@ -28,6 +31,36 @@ pub struct InjectionScore {
     pub score: f64,
     pub is_injection: bool,
     pub details: String,
+}
+
+/// Per-feature statistical model (loaded from trainer output).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FeatureStats {
+    pub name: String,
+    pub mean: f64,
+    pub stddev: f64,
+    pub min: f64,
+    pub max: f64,
+    pub p5: f64,
+    pub p25: f64,
+    pub p50: f64,
+    pub p75: f64,
+    pub p95: f64,
+    pub iqr: f64,
+    pub lower_fence: f64,
+    pub upper_fence: f64,
+    pub ewma: f64,
+    pub ewma_alpha: f64,
+    pub sample_count: u64,
+}
+
+/// Trained anomaly detection model (loaded from JSON produced by trainer cell).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TrainedAnomalyModel {
+    pub features: Vec<FeatureStats>,
+    pub correlations: Vec<(String, String, f64)>,
+    pub trained_at: String,
+    pub sample_count: u64,
 }
 
 impl InferenceEngine {
@@ -55,22 +88,29 @@ impl InferenceEngine {
             gte_small_available,
             lightlog_available,
             deberta_pi_available,
+            trained_model: RwLock::new(None),
         })
     }
 
     /// Run anomaly detection on system metrics time series.
-    /// Uses TCN-AE (Temporal Convolutional Network Autoencoder).
+    ///
+    /// Priority chain:
+    /// 1. ONNX TCN-AE model (if available)
+    /// 2. Trained statistical model (if loaded from trainer cell)
+    /// 3. Naive z-score fallback
     pub fn infer_anomaly(&self, metrics: &[f64]) -> Result<AnomalyScore> {
-        if !self.tcn_ae_available {
-            return Ok(AnomalyScore {
-                score: 0.0,
-                is_anomalous: false,
-                details: "TCN-AE model not available".into(),
-            });
+        // Priority 1: ONNX model.
+        if self.tcn_ae_available {
+            // TODO: Load and run actual ONNX model via `ort`.
+            // Fall through to trained model / z-score for now.
         }
 
-        // TODO: Load and run actual ONNX model via `ort`.
-        // For now, return a simple statistical anomaly check.
+        // Priority 2: Trained statistical model.
+        if let Some(ref model) = *self.trained_model.read() {
+            return self.infer_with_trained_model(model, metrics);
+        }
+
+        // Priority 3: Naive z-score fallback.
         let mean = metrics.iter().sum::<f64>() / metrics.len() as f64;
         let variance = metrics.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / metrics.len() as f64;
         let stddev = variance.sqrt();
@@ -82,10 +122,110 @@ impl InferenceEngine {
         };
 
         Ok(AnomalyScore {
-            score: z_score / 3.0, // Normalize to roughly 0-1.
+            score: z_score / 3.0,
             is_anomalous: z_score > 3.0,
-            details: format!("z_score={z_score:.2}, mean={mean:.2}, stddev={stddev:.2}"),
+            details: format!("z_score={z_score:.2}, mean={mean:.2}, stddev={stddev:.2} (fallback)"),
         })
+    }
+
+    /// Multi-signal anomaly scoring using the trained model.
+    fn infer_with_trained_model(
+        &self,
+        model: &TrainedAnomalyModel,
+        metrics: &[f64],
+    ) -> Result<AnomalyScore> {
+        // Map the incoming 1D metrics slice (CPU load history) to cpu_load_1m feature.
+        let latest = metrics.last().copied().unwrap_or(0.0);
+
+        // Find the cpu_load_1m feature stats.
+        let cpu_stats = model.features.iter().find(|f| f.name == "cpu_load_1m");
+        let Some(stats) = cpu_stats else {
+            return Ok(AnomalyScore {
+                score: 0.0,
+                is_anomalous: false,
+                details: "trained model has no cpu_load_1m feature".into(),
+            });
+        };
+
+        let mut signals = Vec::new();
+
+        // Signal 1: IQR outlier (weight 0.30).
+        let iqr_score = if latest < stats.lower_fence || latest > stats.upper_fence {
+            let dist = if latest < stats.lower_fence {
+                (stats.lower_fence - latest) / stats.iqr.max(0.001)
+            } else {
+                (latest - stats.upper_fence) / stats.iqr.max(0.001)
+            };
+            (dist / 3.0).min(1.0) // Normalize: 3 IQRs beyond fence → 1.0
+        } else {
+            0.0
+        };
+        signals.push(("iqr", iqr_score, 0.30));
+
+        // Signal 2: Percentile extremity (weight 0.25).
+        let pct_score = if latest < stats.p5 {
+            ((stats.p5 - latest) / (stats.p50 - stats.p5).abs().max(0.001)).min(1.0)
+        } else if latest > stats.p95 {
+            ((latest - stats.p95) / (stats.p95 - stats.p50).abs().max(0.001)).min(1.0)
+        } else {
+            0.0
+        };
+        signals.push(("pctl", pct_score, 0.25));
+
+        // Signal 3: EWMA deviation (weight 0.25).
+        let ewma_score = if stats.stddev > 0.0 {
+            ((latest - stats.ewma).abs() / stats.stddev / 3.0).min(1.0)
+        } else {
+            0.0
+        };
+        signals.push(("ewma", ewma_score, 0.25));
+
+        // Signal 4: z-score (weight 0.20).
+        let z_score = if stats.stddev > 0.0 {
+            ((latest - stats.mean).abs() / stats.stddev / 3.0).min(1.0)
+        } else {
+            0.0
+        };
+        signals.push(("zscore", z_score, 0.20));
+
+        // Weighted average.
+        let total_weight: f64 = signals.iter().map(|(_, _, w)| w).sum();
+        let composite: f64 = signals.iter().map(|(_, s, w)| s * w).sum::<f64>() / total_weight;
+
+        let details_parts: Vec<String> = signals
+            .iter()
+            .map(|(name, score, _)| format!("{name}={score:.3}"))
+            .collect();
+
+        Ok(AnomalyScore {
+            score: composite,
+            is_anomalous: composite > 0.7,
+            details: format!(
+                "trained({}) composite={composite:.3}",
+                details_parts.join(", ")
+            ),
+        })
+    }
+
+    /// Load a trained anomaly model from JSON.
+    pub fn load_trained_model(&self, json: &str) -> Result<()> {
+        let model: TrainedAnomalyModel = serde_json::from_str(json)
+            .context("failed to parse trained anomaly model JSON")?;
+        anyhow::ensure!(!model.features.is_empty(), "trained model has no features");
+        anyhow::ensure!(model.sample_count > 0, "trained model has zero samples");
+        tracing::info!(
+            features = model.features.len(),
+            samples = model.sample_count,
+            trained_at = %model.trained_at,
+            "loaded trained anomaly model"
+        );
+        *self.trained_model.write() = Some(model);
+        Ok(())
+    }
+
+    /// Check whether a trained model is currently loaded.
+    pub fn has_trained_model(&self) -> bool {
+        self.trained_model.read().is_some()
     }
 
     /// Generate text embeddings using GTE-small.

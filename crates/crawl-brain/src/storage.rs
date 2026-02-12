@@ -1,12 +1,14 @@
 //! Storage layer: redb (KV) + rusqlite (relational).
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use redb::{Database, TableDefinition};
 use rusqlite::Connection;
 use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::config::StorageConfig;
+use crate::monitor::MetricsSnapshot;
 
 // ── redb table definitions ──────────────────────────────────────────
 
@@ -144,6 +146,19 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_research_query ON research_results(query);
             CREATE INDEX IF NOT EXISTS idx_wisdom_kind ON wisdom_entries(kind);
             CREATE INDEX IF NOT EXISTS idx_wisdom_active ON wisdom_entries(active);
+
+            CREATE TABLE IF NOT EXISTS metrics_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cpu_load_1m REAL NOT NULL,
+                cpu_load_5m REAL NOT NULL,
+                cpu_load_15m REAL NOT NULL,
+                mem_total_kb INTEGER NOT NULL,
+                mem_available_kb INTEGER NOT NULL,
+                mem_used_percent REAL NOT NULL,
+                uptime_secs REAL NOT NULL,
+                recorded_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON metrics_history(recorded_at);
             ",
         )?;
 
@@ -202,5 +217,74 @@ impl Storage {
         let read_txn = self.kv.begin_read()?;
         let table = read_txn.open_table(CELL_STATE_TABLE)?;
         Ok(table.get(cell_id)?.map(|v| v.value().to_vec()))
+    }
+
+    // ── Metrics history operations ──────────────────────────────────
+
+    /// Insert a metrics snapshot into the history table.
+    pub fn insert_metrics(&self, snapshot: &MetricsSnapshot) -> Result<()> {
+        let db = self.db.lock();
+        db.execute(
+            "INSERT INTO metrics_history (cpu_load_1m, cpu_load_5m, cpu_load_15m, mem_total_kb, mem_available_kb, mem_used_percent, uptime_secs, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                snapshot.cpu_load_1m,
+                snapshot.cpu_load_5m,
+                snapshot.cpu_load_15m,
+                snapshot.mem_total_kb,
+                snapshot.mem_available_kb,
+                snapshot.mem_used_percent,
+                snapshot.uptime_secs,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Export metrics from the last N hours as a JSON array string.
+    pub fn export_metrics_json(&self, since_hours: u32) -> Result<String> {
+        let db = self.db.lock();
+        let cutoff = (Utc::now() - chrono::Duration::hours(since_hours as i64)).to_rfc3339();
+        let mut stmt = db.prepare(
+            "SELECT cpu_load_1m, cpu_load_5m, cpu_load_15m, mem_total_kb, mem_available_kb, mem_used_percent, uptime_secs, recorded_at FROM metrics_history WHERE recorded_at >= ?1 ORDER BY recorded_at ASC",
+        )?;
+        let rows: Vec<serde_json::Value> = stmt
+            .query_map(rusqlite::params![cutoff], |row| {
+                Ok(serde_json::json!({
+                    "cpu_load_1m": row.get::<_, f64>(0)?,
+                    "cpu_load_5m": row.get::<_, f64>(1)?,
+                    "cpu_load_15m": row.get::<_, f64>(2)?,
+                    "mem_total_kb": row.get::<_, i64>(3)?,
+                    "mem_available_kb": row.get::<_, i64>(4)?,
+                    "mem_used_percent": row.get::<_, f64>(5)?,
+                    "uptime_secs": row.get::<_, f64>(6)?,
+                    "recorded_at": row.get::<_, String>(7)?,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(serde_json::to_string(&rows)?)
+    }
+
+    /// Count metrics rows recorded in the last N hours.
+    pub fn metrics_count(&self, since_hours: u32) -> Result<u64> {
+        let db = self.db.lock();
+        let cutoff = (Utc::now() - chrono::Duration::hours(since_hours as i64)).to_rfc3339();
+        let count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM metrics_history WHERE recorded_at >= ?1",
+            rusqlite::params![cutoff],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Delete metrics rows older than N hours. Returns number of rows deleted.
+    pub fn prune_metrics(&self, keep_hours: u32) -> Result<u64> {
+        let db = self.db.lock();
+        let cutoff = (Utc::now() - chrono::Duration::hours(keep_hours as i64)).to_rfc3339();
+        let deleted = db.execute(
+            "DELETE FROM metrics_history WHERE recorded_at < ?1",
+            rusqlite::params![cutoff],
+        )?;
+        Ok(deleted as u64)
     }
 }

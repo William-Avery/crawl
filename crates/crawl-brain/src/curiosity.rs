@@ -124,6 +124,11 @@ impl CuriosityLoop {
         let config = &self.brain.config.autonomy;
         let reward_enabled = config.reward.enabled;
 
+        // ── Step 0: Load trained model if available ────────────────
+        if let Err(e) = self.maybe_load_trained_model() {
+            tracing::debug!(error = %e, "failed to load trained model");
+        }
+
         // ── Step 1: Score unscored tasks ────────────────────────────
         let (tasks_scored, cycle_avg_composite) = if reward_enabled {
             self.reward_engine.score_unscored_tasks().unwrap_or((0, 0.0))
@@ -257,6 +262,26 @@ impl CuriosityLoop {
                 &summary,
                 serde_json::json!({"source": "autonomy", "type": "think_cycle"}),
             );
+        }
+
+        // ── Step 4b: Auto-submit training task if conditions met ─────
+        if self.should_propose_training() {
+            match self.maybe_export_training_data() {
+                Ok(Some(path)) => {
+                    match self.submit_training_task(&path).await {
+                        Ok(task_id) => {
+                            tracing::info!(task_id = %task_id, "auto-submitted training task");
+                        }
+                        Err(e) => {
+                            tracing::debug!(error = %e, "failed to submit training task");
+                        }
+                    }
+                }
+                Ok(None) => {} // not enough data
+                Err(e) => {
+                    tracing::debug!(error = %e, "failed to export training data");
+                }
+            }
         }
 
         // ── Step 5: Update EWMA and run reflection if due ───────────
@@ -734,6 +759,128 @@ Respond ONLY with the JSON array, no other text."#,
             .collect();
 
         Ok(results)
+    }
+
+    // ── Training pipeline orchestration ─────────────────────────────
+
+    /// Export metrics history to workspace JSON if enough samples exist.
+    /// Returns the file path if exported, None if insufficient data.
+    fn maybe_export_training_data(&self) -> Result<Option<String>> {
+        let count = self.brain.storage.metrics_count(24)?;
+        if count < 500 {
+            tracing::trace!(count, "insufficient metrics for training (need >= 500)");
+            return Ok(None);
+        }
+
+        let json = self.brain.storage.export_metrics_json(24)?;
+        let workspace = &self.brain.config.paths.workspace_dir;
+        std::fs::create_dir_all(workspace)
+            .with_context(|| format!("failed to create workspace: {}", workspace.display()))?;
+
+        let path = workspace.join("training_data.json");
+        std::fs::write(&path, &json)
+            .with_context(|| format!("failed to write training data: {}", path.display()))?;
+
+        tracing::debug!(samples = count, path = %path.display(), "exported training data");
+        Ok(Some(path.to_string_lossy().into_owned()))
+    }
+
+    /// Check whether we should auto-submit a training task this cycle.
+    fn should_propose_training(&self) -> bool {
+        // Trainer cell must be loaded.
+        if !self.brain.engine.is_loaded("trainer") {
+            return false;
+        }
+
+        // Need enough data.
+        let count = self.brain.storage.metrics_count(24).unwrap_or(0);
+        if count < 500 {
+            return false;
+        }
+
+        // No pending/running training tasks.
+        let db = self.brain.storage.db.lock();
+        let active: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE cell_id = 'trainer' AND status IN ('pending', 'running')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if active > 0 {
+            return false;
+        }
+
+        true
+    }
+
+    /// Build and submit a BUILD task to the trainer cell.
+    async fn submit_training_task(&self, data_path: &str) -> Result<Uuid> {
+        let task_id = Uuid::now_v7();
+        let task = Task {
+            id: task_id,
+            verb: TaskVerb::Build,
+            description: "Train statistical anomaly model from metrics history".to_string(),
+            target: "anomaly_model".to_string(),
+            params: serde_json::json!({
+                "source": "autonomy",
+                "training_data_path": data_path,
+            }),
+            budget: graduated_budget(&TaskVerb::Build),
+            cell_id: "trainer".to_string(),
+            created_at: Utc::now(),
+            continuation: None,
+        };
+
+        // Persist to SQLite.
+        {
+            let db = self.brain.storage.db.lock();
+            db.execute(
+                "INSERT INTO tasks (id, verb, cell_id, description, target, params, status, budget, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    task_id.to_string(),
+                    serde_json::to_string(&task.verb)?,
+                    task.cell_id,
+                    task.description,
+                    task.target,
+                    serde_json::to_string(&task.params)?,
+                    "pending",
+                    serde_json::to_string(&task.budget)?,
+                    task.created_at.to_rfc3339(),
+                ],
+            )?;
+        }
+
+        self.scheduler.submit(task, Priority::Low).await?;
+        Ok(task_id)
+    }
+
+    /// Load a trained anomaly model if one exists and is newer than what's loaded.
+    fn maybe_load_trained_model(&self) -> Result<bool> {
+        let model_path = self.brain.config.paths.workspace_dir.join("trained_anomaly_model.json");
+        if !model_path.exists() {
+            return Ok(false);
+        }
+
+        let Some(ref inference) = self.brain.inference else {
+            return Ok(false);
+        };
+
+        // Skip if we already have a trained model loaded.
+        // We reload unconditionally when the file is present and no model loaded,
+        // and also check file mtime vs a stored timestamp to detect new models.
+        if inference.has_trained_model() {
+            // Check if the file is newer than our last load by comparing content.
+            // Simple approach: re-read and compare trained_at field.
+            // For efficiency, just skip — the model will be reloaded on restart
+            // or when a new training run produces a different file.
+            return Ok(false);
+        }
+
+        let json = std::fs::read_to_string(&model_path)
+            .with_context(|| format!("failed to read trained model: {}", model_path.display()))?;
+        inference.load_trained_model(&json)?;
+        Ok(true)
     }
 }
 

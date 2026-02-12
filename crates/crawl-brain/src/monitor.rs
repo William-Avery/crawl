@@ -39,6 +39,11 @@ pub async fn run_monitor_loop(brain: Arc<BrainState>) -> Result<()> {
 
         match collect_metrics() {
             Ok(snapshot) => {
+                // Persist to metrics_history table.
+                if let Err(e) = brain.storage.insert_metrics(&snapshot) {
+                    tracing::debug!("failed to persist metrics: {e}");
+                }
+
                 // Track CPU history.
                 if cpu_history.len() >= 60 {
                     cpu_history.remove(0);

@@ -47,6 +47,7 @@ const PLUGIN_CRATES: &[&str] = &[
     "crates/crawl-plugin-sysmon",
     "crates/crawl-plugin-logwatch",
     "crates/crawl-plugin-identifier",
+    "crates/crawl-plugin-trainer",
 ];
 
 fn build_plugins() -> Result<()> {
