@@ -1,0 +1,14 @@
+[package]
+name = "crawl-plugin-identifier"
+description = "Process/file identifier Cell — uses LLM to classify entities"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+crawl-plugin-sdk = { path = "../crawl-plugin-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]

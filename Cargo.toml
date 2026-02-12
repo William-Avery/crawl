@@ -1,0 +1,110 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/crawl-brain",
+    "crates/crawl-types",
+    "xtask",
+]
+
+exclude = [
+    "crates/crawl-plugin-sdk",
+    "crates/crawl-plugin-sysmon",
+    "crates/crawl-plugin-logwatch",
+    "crates/crawl-plugin-identifier",
+]
+
+# Plugin crates target wasm32-wasip2 and are built separately via xtask
+# They are NOT workspace members to avoid host-target build conflicts
+# See: crates/crawl-plugin-sdk, crates/crawl-plugin-sysmon, etc.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.93"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.47", features = ["full"] }
+
+# WASM runtime
+wasmtime = { version = "30", features = ["component-model", "async", "cranelift"] }
+wasmtime-wasi = { version = "30" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+ron = "0.9"
+postcard = { version = "1", features = ["alloc"] }
+
+# Crypto
+ring = "0.17"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+
+# HTTP client (for Ollama + research)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Rate limiting
+governor = "0.8"
+
+# Storage
+redb = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Git
+gix = { version = "0.70", default-features = false, features = ["basic", "worktree-mutation"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.28"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# gRPC
+tonic = "0.12"
+tonic-reflection = "0.12"
+tonic-web = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# CLI / config
+clap = { version = "4", features = ["derive"] }
+
+# Chrono
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v7", "serde"] }
+
+# Testing
+proptest = "1"
+insta = { version = "1", features = ["json"] }
+
+# Sandbox
+landlock = "0.4"
+
+# ONNX
+ort = { version = "2.0.0-rc.11", features = ["load-dynamic"] }
+
+# Misc
+bytes = "1"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.9"
+parking_lot = "0.12"
+dashmap = "6"
+arc-swap = "1"
+notify = "7"
+nonzero_ext = "0.3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

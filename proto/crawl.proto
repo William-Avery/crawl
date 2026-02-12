@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package crawl.v1;
+
+// The Brain query service — exposed over UDS + gRPC-Web.
+service BrainService {
+    // Health check.
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+
+    // Task operations.
+    rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse);
+    rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+    rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+
+    // Cell (plugin) operations.
+    rpc ListCells(ListCellsRequest) returns (ListCellsResponse);
+
+    // Memory operations.
+    rpc SearchMemory(SearchMemoryRequest) returns (SearchMemoryResponse);
+    rpc StoreMemory(StoreMemoryRequest) returns (StoreMemoryResponse);
+
+    // Journal operations.
+    rpc GetJournalEvents(GetJournalEventsRequest) returns (GetJournalEventsResponse);
+
+    // Metrics.
+    rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+
+    // Research.
+    rpc Research(ResearchRequest) returns (ResearchResponse);
+}
+
+// ── Health ──────────────────────────────────────────────────────────
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+    string version = 1;
+    string status = 2;
+    uint64 uptime_secs = 3;
+    uint32 loaded_cells = 4;
+    uint64 total_tasks_completed = 5;
+    uint64 ollama_queries = 6;
+    uint64 ollama_tokens = 7;
+}
+
+// ── Tasks ───────────────────────────────────────────────────────────
+
+message SubmitTaskRequest {
+    string verb = 1;          // IDENTIFY, MONITOR, etc.
+    string cell_id = 2;       // Target Cell.
+    string description = 3;
+    string target = 4;
+    string params_json = 5;   // JSON-encoded parameters.
+    string priority = 6;      // high, normal, low.
+    Budget budget = 7;
+}
+
+message SubmitTaskResponse {
+    string task_id = 1;
+}
+
+message GetTaskRequest {
+    string task_id = 1;
+}
+
+message GetTaskResponse {
+    TaskInfo task = 1;
+}
+
+message ListTasksRequest {
+    string status_filter = 1; // pending, running, completed, failed.
+    uint32 limit = 2;
+}
+
+message ListTasksResponse {
+    repeated TaskInfo tasks = 1;
+}
+
+message TaskInfo {
+    string id = 1;
+    string verb = 2;
+    string cell_id = 3;
+    string description = 4;
+    string target = 5;
+    string status = 6;
+    string created_at = 7;
+    string completed_at = 8;
+    string result_json = 9;
+}
+
+message Budget {
+    uint64 time_budget_ms = 1;
+    uint32 max_tool_calls = 2;
+    uint64 max_bytes_read = 3;
+    uint64 max_bytes_written = 4;
+    uint32 max_network_calls = 5;
+    uint32 max_llm_calls = 6;
+    uint32 max_tokens_per_call = 7;
+    string risk_tier = 8;
+}
+
+// ── Cells ───────────────────────────────────────────────────────────
+
+message ListCellsRequest {}
+
+message ListCellsResponse {
+    repeated CellInfo cells = 1;
+}
+
+message CellInfo {
+    string cell_id = 1;
+    string name = 2;
+    string version = 3;
+    repeated string capabilities = 4;
+    repeated string supported_verbs = 5;
+}
+
+// ── Memory ──────────────────────────────────────────────────────────
+
+message SearchMemoryRequest {
+    string query = 1;
+    uint32 top_k = 2;
+}
+
+message SearchMemoryResponse {
+    repeated MemoryEntry entries = 1;
+}
+
+message StoreMemoryRequest {
+    string content = 1;
+    string metadata_json = 2;
+}
+
+message StoreMemoryResponse {
+    string id = 1;
+}
+
+message MemoryEntry {
+    string id = 1;
+    string content = 2;
+    double similarity = 3;
+    string metadata_json = 4;
+    string created_at = 5;
+}
+
+// ── Journal ─────────────────────────────────────────────────────────
+
+message GetJournalEventsRequest {
+    uint32 limit = 1;
+    string kind_filter = 2;
+}
+
+message GetJournalEventsResponse {
+    repeated JournalEvent events = 1;
+}
+
+message JournalEvent {
+    string id = 1;
+    string timestamp = 2;
+    string kind = 3;
+    string task_id = 4;
+    string cell_id = 5;
+    string payload_json = 6;
+}
+
+// ── Metrics ─────────────────────────────────────────────────────────
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+    double cpu_load_1m = 1;
+    double cpu_load_5m = 2;
+    double cpu_load_15m = 3;
+    uint64 mem_total_kb = 4;
+    uint64 mem_available_kb = 5;
+    double mem_used_percent = 6;
+    double uptime_secs = 7;
+}
+
+// ── Research ────────────────────────────────────────────────────────
+
+message ResearchRequest {
+    string query = 1;
+    uint32 max_tier = 2; // 1-5.
+}
+
+message ResearchResponse {
+    uint32 tier_used = 1;
+    string answer = 2;
+    double confidence = 3;
+    repeated string sources = 4;
+    bool tainted = 5;
+}

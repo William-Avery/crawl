@@ -1,0 +1,38 @@
+[daemon]
+policy_path = "policy/default.ron"
+policy_sig_path = "policy/default.ron.sig"
+log_level = "info"
+require_policy_signature = false
+
+[paths]
+plugins_dir = "plugins"
+workspace_dir = "workspace"
+models_dir = "models"
+
+[ollama]
+base_url = "http://localhost:11434"
+model = "glm4:latest"
+rate_limit_rps = 5.0
+default_max_tokens = 2048
+timeout_ms = 60000
+
+[inference]
+use_tensorrt = true
+use_cuda = true
+intra_op_threads = 2
+
+[storage]
+redb_path = "data/brain.redb"
+sqlite_path = "data/brain.sqlite"
+journal_dir = "data/journal"
+journal_max_size = 67108864
+
+[api]
+uds_path = "data/crawl-brain.sock"
+grpc_web_port = 9090
+metrics_port = 9091
+
+[monitor]
+metrics_interval_ms = 5000
+log_scan_interval_ms = 10000
+anomaly_threshold = 0.8

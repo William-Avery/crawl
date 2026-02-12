@@ -1,0 +1,9 @@
+/target
+**/target
+/data
+/workspace
+/plugins
+*.swp
+*.swo
+*~
+.DS_Store

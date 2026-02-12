@@ -1,0 +1,195 @@
+/// The complete crawl plugin WIT definition.
+///
+/// Defines the contract between the Brain (host) and Cells (guests).
+package crawl:plugin@0.1.0;
+
+// ── Task Types ──────────────────────────────────────────────────────
+
+interface task-types {
+    /// Task verbs that a Cell can handle.
+    enum task-verb {
+        identify,
+        monitor,
+        procure,
+        maintain,
+        build,
+        update,
+        crud,
+    }
+
+    /// Risk tier for a task.
+    enum risk-tier {
+        low,
+        medium,
+        high,
+        critical,
+    }
+
+    /// Budget assigned to a task.
+    record budget {
+        time-budget-ms: option<u64>,
+        max-tool-calls: u32,
+        max-bytes-read: u64,
+        max-bytes-written: u64,
+        max-network-calls: u32,
+        max-llm-calls: u32,
+        max-tokens-per-call: u32,
+        risk-tier: risk-tier,
+    }
+
+    /// A task dispatched to a Cell.
+    record task {
+        id: string,
+        verb: task-verb,
+        description: string,
+        target: string,
+        params: string,
+        budget: budget,
+    }
+
+    /// Checkpoint state for incomplete tasks.
+    record checkpoint {
+        continuation-id: string,
+        cursor: string,
+        state-blob-ref: option<string>,
+        completed-steps: list<string>,
+        current-stage: string,
+        continuation-plan: string,
+        remaining-estimate-ms: option<u64>,
+    }
+
+    /// Result from a Cell execution.
+    variant task-result {
+        completed(string),
+        checkpointed(checkpoint),
+        failed(string),
+    }
+}
+
+// ── Host Tools ──────────────────────────────────────────────────────
+
+interface host-tools {
+    /// Read a file (scoped to allowed paths).
+    read-file: func(path: string, max-bytes: u32) -> result<list<u8>, string>;
+
+    /// List files in a directory (scoped to allowed paths).
+    list-dir: func(path: string) -> result<list<string>, string>;
+
+    /// Write a file (scoped to allowed paths).
+    write-file: func(path: string, data: list<u8>) -> result<_, string>;
+
+    /// List running processes.
+    list-processes: func() -> result<list<process-info>, string>;
+
+    /// Read log lines from a source.
+    read-log: func(source: string, lines: u32) -> result<list<string>, string>;
+
+    /// Execute an allowlisted CLI command.
+    exec-command: func(cmd: string, args: list<string>) -> result<command-output, string>;
+
+    /// Make an HTTP GET request (allowlisted domains only).
+    http-get: func(url: string) -> result<http-response, string>;
+
+    /// Emit a structured event to the journal.
+    emit-event: func(kind: string, payload: string) -> result<_, string>;
+
+    /// Get a configuration value.
+    get-config: func(key: string) -> result<string, string>;
+
+    /// Store a value in semantic memory.
+    memory-store: func(content: string, metadata: string) -> result<string, string>;
+
+    /// Search semantic memory by query.
+    memory-search: func(query: string, top-k: u32) -> result<list<memory-result>, string>;
+
+    /// Run anomaly detection on a metrics time series.
+    infer-anomaly: func(metrics: list<f64>) -> result<anomaly-result, string>;
+
+    /// Generate text embeddings.
+    embed-text: func(text: string) -> result<list<f32>, string>;
+
+    record process-info {
+        pid: u32,
+        name: string,
+        cmdline: string,
+        cpu-percent: f32,
+        mem-kb: u64,
+    }
+
+    record command-output {
+        exit-code: s32,
+        stdout: string,
+        stderr: string,
+    }
+
+    record http-response {
+        status: u16,
+        body: string,
+        headers: list<tuple<string, string>>,
+    }
+
+    record memory-result {
+        id: string,
+        content: string,
+        similarity: f64,
+        metadata: string,
+    }
+
+    record anomaly-result {
+        score: f64,
+        is-anomalous: bool,
+        details: string,
+    }
+}
+
+// ── LLM API ─────────────────────────────────────────────────────────
+
+interface llm-api {
+    record llm-request {
+        prompt: string,
+        max-tokens: u32,
+        temperature: option<f32>,
+    }
+
+    record llm-response {
+        text: string,
+        tokens-used: u32,
+        tainted: bool,
+    }
+
+    /// Query the LLM. Budget-controlled and rate-limited by the host.
+    query: func(req: llm-request) -> result<llm-response, string>;
+}
+
+// ── Plugin API (exported by Cells) ──────────────────────────────────
+
+interface plugin-api {
+    use task-types.{task, task-result, checkpoint};
+
+    /// Initialize the plugin. Called once when the Cell is loaded.
+    init: func() -> result<_, string>;
+
+    /// Execute a task. The Cell must return a result within its budget.
+    execute: func(task: task) -> task-result;
+
+    /// Resume a previously checkpointed task.
+    resume: func(task: task, checkpoint: checkpoint) -> task-result;
+
+    /// Get plugin metadata.
+    describe: func() -> plugin-info;
+
+    record plugin-info {
+        name: string,
+        version: string,
+        description: string,
+        supported-verbs: list<string>,
+    }
+}
+
+// ── World ───────────────────────────────────────────────────────────
+
+world cell {
+    import host-tools;
+    import llm-api;
+    export plugin-api;
+}
