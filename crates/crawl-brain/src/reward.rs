@@ -22,6 +22,7 @@ use crate::journal::Journal;
 use crate::memory::MemorySystem;
 use crate::ollama::OllamaClient;
 use crate::soul::{ReflectionContext, Soul};
+use crate::wisdom::{DistillationInput, WisdomSystem};
 
 /// A scored task row from SQLite.
 struct ScoredTask {
@@ -66,6 +67,7 @@ pub struct RewardEngine {
     ewma_composite: f64,
     cycle_count: u64,
     soul: Soul,
+    wisdom: Option<Arc<WisdomSystem>>,
 }
 
 impl RewardEngine {
@@ -76,6 +78,7 @@ impl RewardEngine {
         memory: Arc<MemorySystem>,
         config: RewardConfig,
         soul: Soul,
+        wisdom: Option<Arc<WisdomSystem>>,
     ) -> Self {
         Self {
             db,
@@ -86,6 +89,7 @@ impl RewardEngine {
             ewma_composite: 0.5, // avoid cold-start stall
             cycle_count: 0,
             soul,
+            wisdom,
         }
     }
 
@@ -473,6 +477,60 @@ Respond ONLY with the JSON object."#,
             }
         }
 
+        // ── Wisdom distillation ────────────────────────────────────────
+        let mut wisdom_distilled = 0u32;
+        if let Some(ref wisdom) = self.wisdom {
+            // Build distillation inputs from recently scored tasks.
+            let inputs: Vec<DistillationInput> = recent_scored
+                .iter()
+                .map(|t| {
+                    let outcome = self
+                        .fetch_task_output_preview(&t.task_id, 200)
+                        .unwrap_or_default();
+                    DistillationInput {
+                        task_id: t.task_id.clone(),
+                        verb: t.verb.trim_matches('"').to_string(),
+                        target: t.target.clone(),
+                        composite: t.composite,
+                        novelty: t.novelty,
+                        anomaly: t.anomaly,
+                        confidence: t.confidence,
+                        actionability: t.actionability,
+                        outcome_summary: outcome,
+                    }
+                })
+                .collect();
+
+            let task_ids: Vec<String> = recent_scored.iter().map(|t| t.task_id.clone()).collect();
+            let existing = wisdom.active_entries();
+
+            let ollama = self.ollama.clone();
+            match wisdom.distill(&ollama, &inputs, &existing).await {
+                Ok(distilled) => {
+                    if !distilled.is_empty() {
+                        match wisdom.apply_distilled(&distilled, &task_ids) {
+                            Ok(count) => {
+                                wisdom_distilled = count;
+                                if count > 0 {
+                                    tracing::info!(
+                                        new_entries = count,
+                                        active = wisdom.active_count(),
+                                        "wisdom distillation complete"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "wisdom apply_distilled failed");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "wisdom distillation failed");
+                }
+            }
+        }
+
         // Journal the reflection.
         let _ = self.journal.emit(
             JournalEventKind::AutonomyReflection,
@@ -484,6 +542,7 @@ Respond ONLY with the JSON object."#,
                 "reflection": reflection_json.unwrap_or(Value::String(reflection_text.clone())),
                 "llm_tokens": response.tokens_used,
                 "soul_updated": soul_updated,
+                "wisdom_distilled": wisdom_distilled,
             }),
         );
 

@@ -224,6 +224,9 @@ pub struct AutonomyConfig {
     /// Soul (persistent identity) settings.
     #[serde(default)]
     pub soul: SoulConfig,
+    /// Wisdom (learned constraints) settings.
+    #[serde(default)]
+    pub wisdom: WisdomConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,6 +296,68 @@ impl Default for SoulConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WisdomConfig {
+    /// Whether the wisdom system is enabled.
+    pub enabled: bool,
+    /// Max tokens for distillation LLM call.
+    pub max_distillation_tokens: u32,
+    /// Minimum confidence for a pre-flight wisdom match to be considered.
+    pub preflight_min_confidence: f64,
+    /// Above this confidence, pre-flight blocks the proposal; below, it warns.
+    pub preflight_block_confidence: f64,
+    /// Confidence boost per confirmation.
+    pub reinforce_delta: f64,
+    /// Confidence penalty per contradiction.
+    pub decay_delta: f64,
+    /// Below this confidence, entry is deactivated.
+    pub deactivation_threshold: f64,
+    /// Max wisdom entries to include in LLM prompt.
+    pub max_prompt_entries: usize,
+    /// Maturity thresholds for verb graduation.
+    #[serde(default)]
+    pub maturity: MaturityThresholds,
+}
+
+impl Default for WisdomConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_distillation_tokens: 512,
+            preflight_min_confidence: 0.4,
+            preflight_block_confidence: 0.8,
+            reinforce_delta: 0.1,
+            decay_delta: 0.15,
+            deactivation_threshold: 0.1,
+            max_prompt_entries: 30,
+            maturity: MaturityThresholds::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaturityThresholds {
+    /// Entity count required to graduate to Investigator (PROCURE unlocked).
+    pub investigator_entity_count: u32,
+    /// Wisdom entry count required to graduate to Investigator.
+    pub investigator_wisdom_count: u32,
+    /// Successful PROCURE task count required to graduate to Caretaker (MAINTAIN unlocked).
+    pub caretaker_procure_count: u32,
+    /// Successful MAINTAIN task count required to graduate to Builder (BUILD unlocked).
+    pub builder_maintain_count: u32,
+}
+
+impl Default for MaturityThresholds {
+    fn default() -> Self {
+        Self {
+            investigator_entity_count: 10,
+            investigator_wisdom_count: 5,
+            caretaker_procure_count: 5,
+            builder_maintain_count: 5,
+        }
+    }
+}
+
 impl Default for AutonomyConfig {
     fn default() -> Self {
         Self {
@@ -304,6 +369,7 @@ impl Default for AutonomyConfig {
             allowed_verbs: vec!["IDENTIFY".into(), "MONITOR".into()],
             reward: RewardConfig::default(),
             soul: SoulConfig::default(),
+            wisdom: WisdomConfig::default(),
         }
     }
 }

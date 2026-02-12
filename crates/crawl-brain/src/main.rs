@@ -14,6 +14,7 @@ mod research;
 mod reward;
 mod sandbox;
 mod soul;
+mod wisdom;
 mod scheduler;
 mod storage;
 mod updater;
@@ -124,6 +125,16 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     ));
     info!("research engine initialized");
 
+    // Initialize wisdom system (shares the SQLite connection from storage).
+    let wisdom = if config.autonomy.wisdom.enabled {
+        let ws = wisdom::WisdomSystem::new(storage.db.clone(), config.autonomy.wisdom.clone())?;
+        info!(entries = ws.active_count(), "wisdom system initialized");
+        Some(Arc::new(ws))
+    } else {
+        info!("wisdom system disabled by config");
+        None
+    };
+
     // Shutdown channel: Brain signals all subsystems to stop.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -138,6 +149,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         inference,
         memory,
         research,
+        wisdom,
         shutdown_tx,
     });
 
@@ -196,6 +208,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
             curiosity_sender,
             shutdown_rx.clone(),
             soul,
+            brain.wisdom.clone(),
         );
         Some(tokio::spawn(async move {
             if let Err(e) = loop_.run().await {
@@ -279,6 +292,7 @@ pub struct BrainState {
     pub inference: Option<Arc<inference::InferenceEngine>>,
     pub memory: Arc<memory::MemorySystem>,
     pub research: Arc<research::ResearchEngine>,
+    pub wisdom: Option<Arc<wisdom::WisdomSystem>>,
     /// Send `true` to trigger graceful shutdown of all subsystems.
     pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }

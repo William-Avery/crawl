@@ -44,7 +44,7 @@ think_interval_ms = 60000
 max_pending_tasks = 5
 max_tokens_per_think = 1024
 temperature = 0.4
-allowed_verbs = ["IDENTIFY", "MONITOR"]
+allowed_verbs = ["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "BUILD"]
 
 [autonomy.reward]
 enabled = true
@@ -64,3 +64,19 @@ entity_dedup_threshold = 0.85
 enabled = true
 max_bytes = 4096
 max_update_tokens = 768
+
+[autonomy.wisdom]
+enabled = true
+max_distillation_tokens = 512
+preflight_min_confidence = 0.4
+preflight_block_confidence = 0.8
+reinforce_delta = 0.1
+decay_delta = 0.15
+deactivation_threshold = 0.1
+max_prompt_entries = 30
+
+[autonomy.wisdom.maturity]
+investigator_entity_count = 10
+investigator_wisdom_count = 5
+caretaker_procure_count = 5
+builder_maintain_count = 5

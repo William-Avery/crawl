@@ -17,6 +17,7 @@ use crate::monitor;
 use crate::reward::RewardEngine;
 use crate::scheduler::{Priority, SchedulerSender};
 use crate::soul::Soul;
+use crate::wisdom::{MaturityLevel, PreflightResult, WisdomSystem};
 use crate::BrainState;
 
 /// Proposed task parsed from LLM JSON output.
@@ -26,6 +27,8 @@ struct ProposedTask {
     verb: String,
     description: String,
     target: String,
+    #[serde(default)]
+    hypothesis: Option<String>,
 }
 
 /// The autonomous curiosity loop.
@@ -34,6 +37,7 @@ pub struct CuriosityLoop {
     scheduler: SchedulerSender,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     reward_engine: RewardEngine,
+    wisdom: Option<Arc<WisdomSystem>>,
 }
 
 impl CuriosityLoop {
@@ -42,6 +46,7 @@ impl CuriosityLoop {
         scheduler: SchedulerSender,
         shutdown_rx: tokio::sync::watch::Receiver<bool>,
         soul: Soul,
+        wisdom: Option<Arc<WisdomSystem>>,
     ) -> Self {
         let reward_engine = RewardEngine::new(
             brain.storage.db.clone(),
@@ -50,12 +55,14 @@ impl CuriosityLoop {
             brain.memory.clone(),
             brain.config.autonomy.reward.clone(),
             soul,
+            wisdom.clone(),
         );
         Self {
             brain,
             scheduler,
             shutdown_rx,
             reward_engine,
+            wisdom,
         }
     }
 
@@ -168,6 +175,20 @@ impl CuriosityLoop {
             config.think_interval_ms
         };
 
+        // Wisdom metrics for journal.
+        let wisdom_json = match &self.wisdom {
+            Some(w) if config.wisdom.enabled => {
+                let level = w
+                    .compute_maturity()
+                    .unwrap_or(MaturityLevel::Observer);
+                serde_json::json!({
+                    "active_count": w.active_count(),
+                    "maturity_level": level.name(),
+                })
+            }
+            _ => serde_json::json!(null),
+        };
+
         let _ = self.brain.journal.emit(
             JournalEventKind::AutonomyThinkCycle,
             None,
@@ -192,6 +213,7 @@ impl CuriosityLoop {
                     "current_interval_ms": current_interval_ms,
                     "entities_total": entities_total,
                 },
+                "wisdom": wisdom_json,
             }),
         );
 
@@ -330,6 +352,19 @@ impl CuriosityLoop {
             String::new()
         };
 
+        // Wisdom context.
+        let (wisdom_summary, maturity_level) = match &self.wisdom {
+            Some(w) if self.brain.config.autonomy.wisdom.enabled => {
+                let summary = w.build_prompt_section();
+                let level = w.compute_maturity().unwrap_or(MaturityLevel::Observer);
+                (
+                    summary,
+                    format!("{} (Level {})", level.name(), level as u32),
+                )
+            }
+            _ => (String::new(), String::new()),
+        };
+
         Ok(ObservationContext {
             cpu_load_1m: metrics.cpu_load_1m,
             cpu_load_5m: metrics.cpu_load_5m,
@@ -351,13 +386,23 @@ impl CuriosityLoop {
             entity_summary,
             reflection_notes,
             soul,
+            wisdom_summary,
+            maturity_level,
         })
     }
 
     /// Build the LLM reasoning prompt with current observations.
     fn build_reasoning_prompt(&self, ctx: &ObservationContext) -> String {
         let config = &self.brain.config.autonomy;
-        let allowed_verbs = config.allowed_verbs.join(", ");
+
+        // Compute effective verbs: maturity-gated intersection with config ceiling.
+        let allowed_verbs = match &self.wisdom {
+            Some(w) if config.wisdom.enabled => w
+                .effective_verbs(&config.allowed_verbs)
+                .unwrap_or_else(|_| config.allowed_verbs.clone()),
+            _ => config.allowed_verbs.clone(),
+        };
+        let allowed_verbs_str = allowed_verbs.join(", ");
 
         let cells_section = if ctx.cell_details.is_empty() {
             "  (no cells loaded)".to_string()
@@ -420,10 +465,22 @@ impl CuriosityLoop {
             format!("\n## Soul\n{}\n", ctx.soul)
         };
 
+        let maturity_section = if ctx.maturity_level.is_empty() {
+            String::new()
+        } else {
+            format!("\n## Maturity: {}\n", ctx.maturity_level)
+        };
+
+        let wisdom_section = if ctx.wisdom_summary.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}\n", ctx.wisdom_summary)
+        };
+
         format!(
 r#"You are the reasoning core of a local system observer called "crawl-brain".
 You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this machine — understand what's running, what's normal, what's unusual, and learn about the system over time.
-{soul}
+{soul}{maturity}{wisdom}
 ## Current State
 - Uptime: {uptime:.0}s
 - CPU load: {cpu1:.2}/{cpu5:.2}/{cpu15:.2}
@@ -442,7 +499,8 @@ You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this m
 {scoreboard}{entities}{reflection}
 ## What You Can Do
 You can submit tasks to loaded Cells using these verbs: {verbs}.
-Each task needs: cell_id, verb, description, target.
+Each task needs: cell_id, verb, description, target, and optionally a hypothesis.
+For PROCURE/MAINTAIN/BUILD tasks, always include a hypothesis explaining what you expect to learn or achieve.
 
 ## Instructions
 Think about what would be interesting or useful to investigate right now.
@@ -453,12 +511,15 @@ Consider:
 - What have you already investigated (check recent tasks and known entities) — don't repeat yourself.
 - Are there any anomalies or unusual patterns?
 - What knowledge gaps exist that could be filled?
+- Respect learned wisdom — avoid repeating mistakes listed in constraints.
 
 Respond with a JSON array of 0-3 tasks to submit. If nothing interesting stands out, return an empty array []. Don't force investigations — it's ok to wait.
 
-Format: [{{"cell_id": "...", "verb": "IDENTIFY|MONITOR", "description": "...", "target": "..."}}]
+Format: [{{"cell_id": "...", "verb": "...", "description": "...", "target": "...", "hypothesis": "..."}}]
 Respond ONLY with the JSON array, no other text."#,
             soul = soul_section,
+            maturity = maturity_section,
+            wisdom = wisdom_section,
             uptime = ctx.uptime_secs,
             cpu1 = ctx.cpu_load_1m,
             cpu5 = ctx.cpu_load_5m,
@@ -477,7 +538,7 @@ Respond ONLY with the JSON array, no other text."#,
             scoreboard = scoreboard_section,
             entities = entity_section,
             reflection = reflection_section,
-            verbs = allowed_verbs,
+            verbs = allowed_verbs_str,
         )
     }
 
@@ -510,15 +571,39 @@ Respond ONLY with the JSON array, no other text."#,
     async fn validate_and_submit(&self, proposal: ProposedTask) -> Result<Uuid> {
         let config = &self.brain.config.autonomy;
 
+        // Pre-flight wisdom check.
+        if let Some(ref w) = self.wisdom {
+            if config.wisdom.enabled {
+                match w.preflight_check(&proposal.verb, &proposal.target, &proposal.description) {
+                    PreflightResult::Blocked { reason, .. } => {
+                        anyhow::bail!("blocked by wisdom: {}", reason);
+                    }
+                    PreflightResult::Warned { reason, .. } => {
+                        tracing::debug!(reason, "wisdom warning (proceeding)");
+                    }
+                    PreflightResult::Allowed => {}
+                }
+            }
+        }
+
         // Check cell is loaded.
         if !self.brain.engine.is_loaded(&proposal.cell_id) {
             anyhow::bail!("cell '{}' is not loaded", proposal.cell_id);
         }
 
-        // Check verb is allowed.
+        // Check verb is allowed (maturity-gated).
         let verb_upper = proposal.verb.to_uppercase();
-        if !config.allowed_verbs.iter().any(|v| v.to_uppercase() == verb_upper) {
-            anyhow::bail!("verb '{}' not in allowed_verbs", proposal.verb);
+        let effective = match &self.wisdom {
+            Some(w) if config.wisdom.enabled => w
+                .effective_verbs(&config.allowed_verbs)
+                .unwrap_or_else(|_| config.allowed_verbs.clone()),
+            _ => config.allowed_verbs.clone(),
+        };
+        if !effective.iter().any(|v| v.eq_ignore_ascii_case(&verb_upper)) {
+            anyhow::bail!(
+                "verb '{}' not unlocked at current maturity level",
+                proposal.verb
+            );
         }
 
         // Parse verb.
@@ -533,25 +618,21 @@ Respond ONLY with the JSON array, no other text."#,
             other => anyhow::bail!("unknown verb '{other}'"),
         };
 
-        // Build task with safe autonomy defaults.
+        // Store hypothesis in params if provided.
+        let params = match &proposal.hypothesis {
+            Some(h) => serde_json::json!({"source": "autonomy", "hypothesis": h}),
+            None => serde_json::json!({"source": "autonomy"}),
+        };
+
+        // Build task with graduated budget based on verb tier.
         let task_id = Uuid::now_v7();
         let task = Task {
             id: task_id,
             verb,
             description: proposal.description.clone(),
             target: proposal.target.clone(),
-            params: serde_json::json!({"source": "autonomy"}),
-            budget: Budget {
-                time_budget_ms: Some(30_000),
-                deadline_at: None,
-                max_tool_calls: 50,
-                max_bytes_read: 5 * 1024 * 1024, // 5 MiB
-                max_bytes_written: 0,             // read-only
-                max_network_calls: 0,
-                max_llm_calls: 0,
-                max_tokens_per_call: 0,
-                risk_tier: RiskTier::Low,
-            },
+            params,
+            budget: graduated_budget(&verb),
             cell_id: proposal.cell_id.clone(),
             created_at: Utc::now(),
             continuation: None,
@@ -656,6 +737,67 @@ Respond ONLY with the JSON array, no other text."#,
     }
 }
 
+/// Compute a budget appropriate for the verb's risk tier.
+fn graduated_budget(verb: &TaskVerb) -> Budget {
+    match verb {
+        TaskVerb::Identify | TaskVerb::Monitor => Budget {
+            time_budget_ms: Some(30_000),
+            deadline_at: None,
+            max_tool_calls: 50,
+            max_bytes_read: 5 * 1024 * 1024,
+            max_bytes_written: 0,
+            max_network_calls: 0,
+            max_llm_calls: 0,
+            max_tokens_per_call: 0,
+            risk_tier: RiskTier::Low,
+        },
+        TaskVerb::Procure => Budget {
+            time_budget_ms: Some(60_000),
+            deadline_at: None,
+            max_tool_calls: 100,
+            max_bytes_read: 10 * 1024 * 1024,
+            max_bytes_written: 1024 * 1024,
+            max_network_calls: 0,
+            max_llm_calls: 0,
+            max_tokens_per_call: 0,
+            risk_tier: RiskTier::Medium,
+        },
+        TaskVerb::Maintain => Budget {
+            time_budget_ms: Some(120_000),
+            deadline_at: None,
+            max_tool_calls: 200,
+            max_bytes_read: 20 * 1024 * 1024,
+            max_bytes_written: 10 * 1024 * 1024,
+            max_network_calls: 0,
+            max_llm_calls: 0,
+            max_tokens_per_call: 0,
+            risk_tier: RiskTier::Medium,
+        },
+        TaskVerb::Build => Budget {
+            time_budget_ms: Some(300_000),
+            deadline_at: None,
+            max_tool_calls: 500,
+            max_bytes_read: 50 * 1024 * 1024,
+            max_bytes_written: 20 * 1024 * 1024,
+            max_network_calls: 0,
+            max_llm_calls: 5,
+            max_tokens_per_call: 2048,
+            risk_tier: RiskTier::High,
+        },
+        _ => Budget {
+            time_budget_ms: Some(30_000),
+            deadline_at: None,
+            max_tool_calls: 50,
+            max_bytes_read: 5 * 1024 * 1024,
+            max_bytes_written: 0,
+            max_network_calls: 0,
+            max_llm_calls: 0,
+            max_tokens_per_call: 0,
+            risk_tier: RiskTier::Low,
+        },
+    }
+}
+
 /// Intermediate struct holding gathered observations for a think cycle.
 struct ObservationContext {
     cpu_load_1m: f64,
@@ -678,4 +820,6 @@ struct ObservationContext {
     entity_summary: String,
     reflection_notes: String,
     soul: String,
+    wisdom_summary: String,
+    maturity_level: String,
 }

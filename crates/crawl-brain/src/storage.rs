@@ -122,12 +122,28 @@ impl Storage {
                 scored_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS wisdom_entries (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                content TEXT NOT NULL,
+                evidence TEXT NOT NULL DEFAULT '[]',
+                confidence REAL NOT NULL DEFAULT 0.5,
+                times_confirmed INTEGER NOT NULL DEFAULT 1,
+                times_contradicted INTEGER NOT NULL DEFAULT 0,
+                tags TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_cell_id ON tasks(cell_id);
             CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind);
             CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
             CREATE INDEX IF NOT EXISTS idx_task_rewards_composite ON task_rewards(composite);
             CREATE INDEX IF NOT EXISTS idx_research_query ON research_results(query);
+            CREATE INDEX IF NOT EXISTS idx_wisdom_kind ON wisdom_entries(kind);
+            CREATE INDEX IF NOT EXISTS idx_wisdom_active ON wisdom_entries(active);
             ",
         )?;
 
