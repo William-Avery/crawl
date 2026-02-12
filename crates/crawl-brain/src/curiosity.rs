@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::monitor;
 use crate::reward::RewardEngine;
 use crate::scheduler::{Priority, SchedulerSender};
+use crate::soul::Soul;
 use crate::BrainState;
 
 /// Proposed task parsed from LLM JSON output.
@@ -40,6 +41,7 @@ impl CuriosityLoop {
         brain: Arc<BrainState>,
         scheduler: SchedulerSender,
         shutdown_rx: tokio::sync::watch::Receiver<bool>,
+        soul: Soul,
     ) -> Self {
         let reward_engine = RewardEngine::new(
             brain.storage.db.clone(),
@@ -47,6 +49,7 @@ impl CuriosityLoop {
             brain.journal.clone(),
             brain.memory.clone(),
             brain.config.autonomy.reward.clone(),
+            soul,
         );
         Self {
             brain,
@@ -320,6 +323,13 @@ impl CuriosityLoop {
                 (String::new(), String::new(), String::new())
             };
 
+        // Soul content.
+        let soul = if self.brain.config.autonomy.reward.enabled {
+            self.reward_engine.soul_content().to_string()
+        } else {
+            String::new()
+        };
+
         Ok(ObservationContext {
             cpu_load_1m: metrics.cpu_load_1m,
             cpu_load_5m: metrics.cpu_load_5m,
@@ -340,6 +350,7 @@ impl CuriosityLoop {
             scoreboard,
             entity_summary,
             reflection_notes,
+            soul,
         })
     }
 
@@ -403,10 +414,16 @@ impl CuriosityLoop {
             )
         };
 
+        let soul_section = if ctx.soul.is_empty() {
+            String::new()
+        } else {
+            format!("\n## Soul\n{}\n", ctx.soul)
+        };
+
         format!(
 r#"You are the reasoning core of a local system observer called "crawl-brain".
 You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this machine — understand what's running, what's normal, what's unusual, and learn about the system over time.
-
+{soul}
 ## Current State
 - Uptime: {uptime:.0}s
 - CPU load: {cpu1:.2}/{cpu5:.2}/{cpu15:.2}
@@ -441,6 +458,7 @@ Respond with a JSON array of 0-3 tasks to submit. If nothing interesting stands 
 
 Format: [{{"cell_id": "...", "verb": "IDENTIFY|MONITOR", "description": "...", "target": "..."}}]
 Respond ONLY with the JSON array, no other text."#,
+            soul = soul_section,
             uptime = ctx.uptime_secs,
             cpu1 = ctx.cpu_load_1m,
             cpu5 = ctx.cpu_load_5m,
@@ -659,4 +677,5 @@ struct ObservationContext {
     scoreboard: String,
     entity_summary: String,
     reflection_notes: String,
+    soul: String,
 }

@@ -8,6 +8,7 @@ require_policy_signature = false
 plugins_dir = "plugins"
 workspace_dir = "workspace"
 models_dir = "models"
+soul_path = "data/soul.md"
 
 [ollama]
 base_url = "http://localhost:11434"
@@ -58,3 +59,8 @@ adaptive_min_interval_ms = 20000
 adaptive_max_interval_ms = 300000
 ewma_alpha = 0.3
 entity_dedup_threshold = 0.85
+
+[autonomy.soul]
+enabled = true
+max_bytes = 4096
+max_update_tokens = 768

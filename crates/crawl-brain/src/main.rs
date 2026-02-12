@@ -13,6 +13,7 @@ mod policy;
 mod research;
 mod reward;
 mod sandbox;
+mod soul;
 mod scheduler;
 mod storage;
 mod updater;
@@ -185,10 +186,16 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
 
     // Start the autonomy / curiosity loop.
     let curiosity_handle = if brain.config.autonomy.enabled {
+        let soul = soul::Soul::load(
+            config.paths.soul_path.clone(),
+            config.autonomy.soul.clone(),
+            brain.ollama.clone(),
+        )?;
         let loop_ = curiosity::CuriosityLoop::new(
             brain.clone(),
             curiosity_sender,
             shutdown_rx.clone(),
+            soul,
         );
         Some(tokio::spawn(async move {
             if let Err(e) = loop_.run().await {

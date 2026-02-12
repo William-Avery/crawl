@@ -75,6 +75,13 @@ pub struct PathsConfig {
     pub workspace_dir: PathBuf,
     /// Directory for ONNX model files.
     pub models_dir: PathBuf,
+    /// Path to the soul.md file (brain's evolving identity document).
+    #[serde(default = "default_soul_path")]
+    pub soul_path: PathBuf,
+}
+
+fn default_soul_path() -> PathBuf {
+    PathBuf::from("data/soul.md")
 }
 
 impl Default for PathsConfig {
@@ -83,6 +90,7 @@ impl Default for PathsConfig {
             plugins_dir: PathBuf::from("plugins"),
             workspace_dir: PathBuf::from("workspace"),
             models_dir: PathBuf::from("models"),
+            soul_path: default_soul_path(),
         }
     }
 }
@@ -213,6 +221,9 @@ pub struct AutonomyConfig {
     /// Reward system settings.
     #[serde(default)]
     pub reward: RewardConfig,
+    /// Soul (persistent identity) settings.
+    #[serde(default)]
+    pub soul: SoulConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,6 +273,26 @@ impl Default for RewardConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoulConfig {
+    /// Whether the soul system is enabled.
+    pub enabled: bool,
+    /// Maximum size of soul.md in bytes (prevents prompt bloat).
+    pub max_bytes: usize,
+    /// Max tokens for the soul update LLM call.
+    pub max_update_tokens: u32,
+}
+
+impl Default for SoulConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_bytes: 4096,
+            max_update_tokens: 768,
+        }
+    }
+}
+
 impl Default for AutonomyConfig {
     fn default() -> Self {
         Self {
@@ -272,6 +303,7 @@ impl Default for AutonomyConfig {
             temperature: 0.4,
             allowed_verbs: vec!["IDENTIFY".into(), "MONITOR".into()],
             reward: RewardConfig::default(),
+            soul: SoulConfig::default(),
         }
     }
 }

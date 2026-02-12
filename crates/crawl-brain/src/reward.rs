@@ -21,6 +21,7 @@ use crate::config::RewardConfig;
 use crate::journal::Journal;
 use crate::memory::MemorySystem;
 use crate::ollama::OllamaClient;
+use crate::soul::{ReflectionContext, Soul};
 
 /// A scored task row from SQLite.
 struct ScoredTask {
@@ -64,6 +65,7 @@ pub struct RewardEngine {
     config: RewardConfig,
     ewma_composite: f64,
     cycle_count: u64,
+    soul: Soul,
 }
 
 impl RewardEngine {
@@ -73,6 +75,7 @@ impl RewardEngine {
         journal: Arc<Journal>,
         memory: Arc<MemorySystem>,
         config: RewardConfig,
+        soul: Soul,
     ) -> Self {
         Self {
             db,
@@ -82,6 +85,7 @@ impl RewardEngine {
             config,
             ewma_composite: 0.5, // avoid cold-start stall
             cycle_count: 0,
+            soul,
         }
     }
 
@@ -314,8 +318,13 @@ impl RewardEngine {
         Ok(out)
     }
 
+    /// Return current soul content for prompt injection.
+    pub fn soul_content(&self) -> &str {
+        self.soul.content()
+    }
+
     /// Run LLM reflection if due this cycle. Returns reflection text if run.
-    pub async fn maybe_reflect(&self) -> Result<Option<String>> {
+    pub async fn maybe_reflect(&mut self) -> Result<Option<String>> {
         if self.cycle_count == 0
             || self.cycle_count % self.config.llm_reflect_every_n_cycles as u64 != 0
         {
@@ -371,7 +380,7 @@ Respond ONLY with the JSON object."#,
             entities = if entity_summary.is_empty() {
                 "(none yet)".to_string()
             } else {
-                entity_summary
+                entity_summary.clone()
             },
         );
 
@@ -409,6 +418,61 @@ Respond ONLY with the JSON object."#,
             }
         }
 
+        // Evolve the soul document with the reflection context.
+        let mut soul_updated = false;
+        if self.soul.enabled() {
+            if let Some(ref json) = reflection_json {
+                let reflection_ctx = ReflectionContext {
+                    understanding_score: json
+                        .get("understanding_score")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.5),
+                    most_valuable: json
+                        .get("most_valuable_tasks")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    least_valuable: json
+                        .get("least_valuable_tasks")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    knowledge_gaps: json
+                        .get("knowledge_gaps")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    strategy: json
+                        .get("strategy_notes")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    entity_summary: entity_summary,
+                };
+
+                match self.soul.evolve(&reflection_ctx).await {
+                    Ok(()) => {
+                        soul_updated = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "soul evolution failed");
+                    }
+                }
+            }
+        }
+
         // Journal the reflection.
         let _ = self.journal.emit(
             JournalEventKind::AutonomyReflection,
@@ -419,6 +483,7 @@ Respond ONLY with the JSON object."#,
                 "tasks_reviewed": recent_scored.len(),
                 "reflection": reflection_json.unwrap_or(Value::String(reflection_text.clone())),
                 "llm_tokens": response.tokens_used,
+                "soul_updated": soul_updated,
             }),
         );
 
