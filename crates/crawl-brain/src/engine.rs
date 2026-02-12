@@ -9,7 +9,11 @@ use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 
 use crate::config::BrainConfig;
-use crawl_types::{Budget, Capability};
+use crate::inference::InferenceEngine;
+use crate::journal::Journal;
+use crate::memory::MemorySystem;
+use crate::ollama::OllamaClient;
+use crawl_types::{Budget, Capability, JournalEventKind, PolicyConfig};
 
 // ── Host-side WIT Bindings ──────────────────────────────────────────
 
@@ -19,6 +23,23 @@ wasmtime::component::bindgen!({
     async: true,
     trappable_imports: true,
 });
+
+// Re-export WIT types for use by scheduler and other modules.
+pub(crate) use crawl::plugin::task_types as wit_task_types;
+
+// ── Subsystem References ────────────────────────────────────────────
+
+/// Shared subsystem references passed into each Cell execution.
+/// All fields are Arc-wrapped so cloning is cheap.
+#[derive(Clone)]
+pub struct SubsystemRefs {
+    pub memory: Arc<MemorySystem>,
+    pub ollama: Arc<OllamaClient>,
+    pub inference: Option<Arc<InferenceEngine>>,
+    pub journal: Arc<Journal>,
+    pub policy: Arc<PolicyConfig>,
+    pub config: BrainConfig,
+}
 
 // ── Cell State ──────────────────────────────────────────────────────
 
@@ -34,10 +55,16 @@ pub struct CellState {
     pub budget: Budget,
     pub output_buffer: Vec<u8>,
     pub table: ResourceTable,
+    pub subsystems: SubsystemRefs,
 }
 
 impl CellState {
-    pub fn new(cell_id: String, capabilities: std::collections::HashSet<Capability>, budget: Budget) -> Self {
+    pub fn new(
+        cell_id: String,
+        capabilities: std::collections::HashSet<Capability>,
+        budget: Budget,
+        subsystems: SubsystemRefs,
+    ) -> Self {
         Self {
             cell_id,
             capabilities,
@@ -49,6 +76,7 @@ impl CellState {
             budget,
             output_buffer: Vec::new(),
             table: ResourceTable::new(),
+            subsystems,
         }
     }
 
@@ -82,6 +110,10 @@ impl crawl::plugin::host_tools::Host for CellState {
         if let Err(e) = self.require_cap(Capability::FilesystemRead) {
             return Ok(Err(e));
         }
+        // Check path against policy allowlist.
+        if !crate::policy::is_path_readable(&path, &self.subsystems.policy) {
+            return Ok(Err(format!("path not in allowed read paths: {path}")));
+        }
         let data = match std::fs::read(&path) {
             Ok(d) => d,
             Err(e) => return Ok(Err(format!("read error: {e}"))),
@@ -92,12 +124,18 @@ impl crawl::plugin::host_tools::Host for CellState {
             data
         };
         self.bytes_read += data.len() as u64;
+        if self.bytes_read > self.budget.max_bytes_read {
+            return Ok(Err(format!("read budget exhausted ({}/{})", self.bytes_read, self.budget.max_bytes_read)));
+        }
         Ok(Ok(data))
     }
 
     async fn list_dir(&mut self, path: String) -> anyhow::Result<std::result::Result<Vec<String>, String>> {
         if let Err(e) = self.require_cap(Capability::FilesystemRead) {
             return Ok(Err(e));
+        }
+        if !crate::policy::is_path_readable(&path, &self.subsystems.policy) {
+            return Ok(Err(format!("path not in allowed read paths: {path}")));
         }
         match std::fs::read_dir(&path) {
             Ok(entries) => Ok(Ok(entries
@@ -111,6 +149,9 @@ impl crawl::plugin::host_tools::Host for CellState {
     async fn write_file(&mut self, path: String, data: Vec<u8>) -> anyhow::Result<std::result::Result<(), String>> {
         if let Err(e) = self.require_cap(Capability::FilesystemWrite) {
             return Ok(Err(e));
+        }
+        if !crate::policy::is_path_writable(&path, &self.subsystems.policy) {
+            return Ok(Err(format!("path not in allowed write paths: {path}")));
         }
         let len = data.len() as u64;
         if self.bytes_written + len > self.budget.max_bytes_written {
@@ -173,6 +214,9 @@ impl crawl::plugin::host_tools::Host for CellState {
         if let Err(e) = self.require_cap(Capability::CliExec) {
             return Ok(Err(e));
         }
+        if !crate::policy::is_command_allowed(&cmd, &self.subsystems.policy) {
+            return Ok(Err(format!("command not in allowlist: {cmd}")));
+        }
         match std::process::Command::new(&cmd).args(&args).output() {
             Ok(output) => Ok(Ok(crawl::plugin::host_tools::CommandOutput {
                 exit_code: output.status.code().unwrap_or(-1),
@@ -183,7 +227,7 @@ impl crawl::plugin::host_tools::Host for CellState {
         }
     }
 
-    async fn http_get(&mut self, _url: String) -> anyhow::Result<std::result::Result<crawl::plugin::host_tools::HttpResponse, String>> {
+    async fn http_get(&mut self, url: String) -> anyhow::Result<std::result::Result<crawl::plugin::host_tools::HttpResponse, String>> {
         if let Err(e) = self.require_cap(Capability::NetworkGet) {
             return Ok(Err(e));
         }
@@ -191,52 +235,139 @@ impl crawl::plugin::host_tools::Host for CellState {
         if self.network_calls_used > self.budget.max_network_calls {
             return Ok(Err("network call budget exhausted".into()));
         }
-        Ok(Err("network feature not yet implemented".into()))
+        // Extract domain and check against policy allowlist.
+        let domain = extract_domain(&url).unwrap_or_default();
+        if !crate::policy::is_domain_allowed(&domain, &self.subsystems.policy) {
+            return Ok(Err(format!("domain '{domain}' not in allowlist")));
+        }
+        // Perform the request. Clone nothing from &mut self across await.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| anyhow::anyhow!("failed to build HTTP client: {e}"))?;
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let headers: Vec<(String, String)> = resp.headers().iter()
+                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                    .collect();
+                let body = resp.text().await.unwrap_or_default();
+                self.bytes_read += body.len() as u64;
+                Ok(Ok(crawl::plugin::host_tools::HttpResponse { status, body, headers }))
+            }
+            Err(e) => Ok(Err(format!("HTTP GET failed: {e}"))),
+        }
     }
 
-    async fn emit_event(&mut self, kind: String, _payload: String) -> anyhow::Result<std::result::Result<(), String>> {
+    async fn emit_event(&mut self, kind: String, payload: String) -> anyhow::Result<std::result::Result<(), String>> {
         if let Err(e) = self.require_cap(Capability::JournalEmit) {
             return Ok(Err(e));
         }
-        tracing::info!(cell_id = %self.cell_id, kind, "cell event emitted");
-        Ok(Ok(()))
+        let event_kind = match kind.as_str() {
+            "anomaly_detected" => JournalEventKind::AnomalyDetected,
+            "tool_call" => JournalEventKind::ToolCall,
+            "llm_query" => JournalEventKind::LlmQuery,
+            "memory_stored" => JournalEventKind::MemoryStored,
+            "injection_detected" => JournalEventKind::InjectionDetected,
+            _ => JournalEventKind::ToolCall,
+        };
+        let payload_val: serde_json::Value = serde_json::from_str(&payload).unwrap_or_default();
+        let journal = self.subsystems.journal.clone();
+        match journal.emit(event_kind, None, Some(self.cell_id.clone()), payload_val) {
+            Ok(()) => Ok(Ok(())),
+            Err(e) => Ok(Err(format!("journal emit failed: {e}"))),
+        }
     }
 
     async fn get_config(&mut self, key: String) -> anyhow::Result<std::result::Result<String, String>> {
         if let Err(e) = self.check_tool_budget() {
             return Ok(Err(e));
         }
-        Ok(Err(format!("config key '{key}' not found")))
+        let config = &self.subsystems.config;
+        match key.as_str() {
+            "ollama.model" => Ok(Ok(config.ollama.model.clone())),
+            "ollama.base_url" => Ok(Ok(config.ollama.base_url.clone())),
+            "paths.plugins_dir" => Ok(Ok(config.paths.plugins_dir.display().to_string())),
+            "paths.workspace_dir" => Ok(Ok(config.paths.workspace_dir.display().to_string())),
+            "paths.models_dir" => Ok(Ok(config.paths.models_dir.display().to_string())),
+            "monitor.anomaly_threshold" => Ok(Ok(config.monitor.anomaly_threshold.to_string())),
+            "monitor.metrics_interval_ms" => Ok(Ok(config.monitor.metrics_interval_ms.to_string())),
+            _ => Ok(Err(format!("config key '{key}' not found"))),
+        }
     }
 
-    async fn memory_store(&mut self, _content: String, _metadata: String) -> anyhow::Result<std::result::Result<String, String>> {
+    async fn memory_store(&mut self, content: String, metadata: String) -> anyhow::Result<std::result::Result<String, String>> {
         if let Err(e) = self.require_cap(Capability::MemoryAccess) {
             return Ok(Err(e));
         }
-        Ok(Ok("placeholder-memory-id".into()))
+        let metadata_val: serde_json::Value = serde_json::from_str(&metadata).unwrap_or_default();
+        let memory = self.subsystems.memory.clone();
+        match memory.store(&content, metadata_val) {
+            Ok(id) => Ok(Ok(id)),
+            Err(e) => Ok(Err(format!("memory store failed: {e}"))),
+        }
     }
 
-    async fn memory_search(&mut self, _query: String, _top_k: u32) -> anyhow::Result<std::result::Result<Vec<crawl::plugin::host_tools::MemoryResult>, String>> {
+    async fn memory_search(&mut self, query: String, top_k: u32) -> anyhow::Result<std::result::Result<Vec<crawl::plugin::host_tools::MemoryResult>, String>> {
         if let Err(e) = self.require_cap(Capability::MemoryAccess) {
             return Ok(Err(e));
         }
-        Ok(Ok(vec![]))
+        let memory = self.subsystems.memory.clone();
+        match memory.search(&query, top_k as usize) {
+            Ok(entries) => {
+                let results = entries.into_iter().map(|e| {
+                    crawl::plugin::host_tools::MemoryResult {
+                        id: e.id,
+                        content: e.content,
+                        similarity: e.similarity.unwrap_or(0.0),
+                        metadata: serde_json::to_string(&e.metadata).unwrap_or_default(),
+                    }
+                }).collect();
+                Ok(Ok(results))
+            }
+            Err(e) => Ok(Err(format!("memory search failed: {e}"))),
+        }
     }
 
-    async fn infer_anomaly(&mut self, _metrics: Vec<f64>) -> anyhow::Result<std::result::Result<crawl::plugin::host_tools::AnomalyResult, String>> {
+    async fn infer_anomaly(&mut self, metrics: Vec<f64>) -> anyhow::Result<std::result::Result<crawl::plugin::host_tools::AnomalyResult, String>> {
         if let Err(e) = self.require_cap(Capability::InferenceRun) {
             return Ok(Err(e));
         }
-        Ok(Ok(crawl::plugin::host_tools::AnomalyResult {
-            score: 0.0, is_anomalous: false, details: "inference not yet connected".into(),
-        }))
+        match &self.subsystems.inference {
+            Some(engine) => {
+                match engine.infer_anomaly(&metrics) {
+                    Ok(score) => Ok(Ok(crawl::plugin::host_tools::AnomalyResult {
+                        score: score.score,
+                        is_anomalous: score.is_anomalous,
+                        details: score.details,
+                    })),
+                    Err(e) => Ok(Err(format!("anomaly inference failed: {e}"))),
+                }
+            }
+            None => Ok(Ok(crawl::plugin::host_tools::AnomalyResult {
+                score: 0.0,
+                is_anomalous: false,
+                details: "inference engine not available".into(),
+            })),
+        }
     }
 
-    async fn embed_text(&mut self, _text: String) -> anyhow::Result<std::result::Result<Vec<f32>, String>> {
+    async fn embed_text(&mut self, text: String) -> anyhow::Result<std::result::Result<Vec<f32>, String>> {
         if let Err(e) = self.require_cap(Capability::InferenceRun) {
             return Ok(Err(e));
         }
-        Ok(Ok(vec![0.0; 384]))
+        match &self.subsystems.inference {
+            Some(engine) => {
+                match engine.embed_text(&text) {
+                    Ok(embedding) => Ok(Ok(embedding)),
+                    Err(e) => Ok(Err(format!("embedding failed: {e}"))),
+                }
+            }
+            None => {
+                // Fallback to hash-based embedding.
+                Ok(Ok(crate::inference::simple_hash_embedding(&text, 384)))
+            }
+        }
     }
 }
 
@@ -256,12 +387,34 @@ impl crawl::plugin::llm_api::Host for CellState {
         }
         self.llm_calls_used += 1;
 
-        Ok(Ok(crawl::plugin::llm_api::LlmResponse {
-            text: format!("(LLM not connected) prompt: {}...", &req.prompt[..req.prompt.len().min(50)]),
-            tokens_used: 0,
-            tainted: false,
-        }))
+        let llm_req = crawl_types::LlmRequest {
+            prompt: req.prompt,
+            max_tokens: req.max_tokens.min(self.budget.max_tokens_per_call),
+            temperature: req.temperature,
+            tainted: false, // Cell-originated prompts are not tainted.
+        };
+
+        // Clone the Arc before awaiting to avoid holding &mut self across .await.
+        let ollama = self.subsystems.ollama.clone();
+        match ollama.query(&llm_req).await {
+            Ok(resp) => Ok(Ok(crawl::plugin::llm_api::LlmResponse {
+                text: resp.text,
+                tokens_used: resp.tokens_used,
+                tainted: resp.tainted,
+            })),
+            Err(e) => Ok(Err(format!("LLM query failed: {e}"))),
+        }
     }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/// Extract domain from a URL string without pulling in the `url` crate.
+fn extract_domain(url: &str) -> Option<String> {
+    let after_scheme = url.split("://").nth(1)?;
+    let host_port = after_scheme.split('/').next()?;
+    let host = host_port.split(':').next()?;
+    Some(host.to_string())
 }
 
 // ── Plugin Metadata ─────────────────────────────────────────────────
@@ -317,6 +470,22 @@ impl PluginEngine {
         removed
     }
 
+    /// Unload all plugins. Called during shutdown.
+    pub fn unload_all(&self) {
+        let mut plugins = self.plugins.write();
+        let count = plugins.len();
+        plugins.clear();
+        tracing::info!(count, "all plugins unloaded");
+    }
+
+    /// Advance the wasmtime epoch to trap all running Cells.
+    pub fn kill_all_cells(&self) {
+        for _ in 0..1000 {
+            self.engine.increment_epoch();
+        }
+        tracing::info!("wasmtime epoch advanced — all running Cells will trap");
+    }
+
     pub fn list_plugins(&self) -> Vec<String> {
         self.plugins.read().keys().cloned().collect()
     }
@@ -340,11 +509,12 @@ impl PluginEngine {
         task: crawl::plugin::task_types::Task,
         capabilities: std::collections::HashSet<Capability>,
         budget: Budget,
+        subsystems: SubsystemRefs,
     ) -> Result<crawl::plugin::task_types::TaskResult> {
         let plugin = self.plugins.read().get(cell_id).cloned()
             .ok_or_else(|| anyhow::anyhow!("plugin '{}' not loaded", cell_id))?;
 
-        let state = CellState::new(cell_id.to_string(), capabilities, budget);
+        let state = CellState::new(cell_id.to_string(), capabilities, budget, subsystems);
         let mut store = Store::new(&self.engine, state);
         store.epoch_deadline_async_yield_and_update(1);
 

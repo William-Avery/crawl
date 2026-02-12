@@ -93,7 +93,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     info!("WASM engine initialized");
 
     // Initialize the Ollama client.
-    let ollama = ollama::OllamaClient::new(&config.ollama);
+    let ollama = Arc::new(ollama::OllamaClient::new(&config.ollama));
     info!(model = %config.ollama.model, "Ollama client initialized");
 
     // Initialize inference (ONNX models) — non-fatal if models aren't present.
@@ -109,8 +109,20 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     };
 
     // Initialize memory system (shares the SQLite connection from storage).
-    let memory = memory::MemorySystem::new(sqlite_db, inference.clone())?;
+    let memory = Arc::new(memory::MemorySystem::new(sqlite_db, inference.clone())?);
     info!("memory system initialized");
+
+    // Initialize research engine.
+    let research = Arc::new(research::ResearchEngine::new(
+        memory.clone(),
+        ollama.clone(),
+        inference.clone(),
+        policy.allowed_network_domains.clone(),
+    ));
+    info!("research engine initialized");
+
+    // Shutdown channel: Brain signals all subsystems to stop.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Build the shared brain state.
     let brain = Arc::new(BrainState {
@@ -122,17 +134,29 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         ollama,
         inference,
         memory,
+        research,
+        shutdown_tx,
     });
 
-    // Initialize scheduler.
-    let scheduler = scheduler::Scheduler::new(brain.clone());
+    // Initialize scheduler (receives shutdown signal).
+    let scheduler = scheduler::Scheduler::new(brain.clone(), shutdown_rx.clone());
+    let scheduler_sender = scheduler.sender();
 
     // Start the monitoring loop.
     let monitor_handle = tokio::spawn({
         let brain = brain.clone();
+        let mut shutdown = shutdown_rx.clone();
         async move {
-            if let Err(e) = monitor::run_monitor_loop(brain).await {
-                error!("monitor loop exited with error: {e}");
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => {
+                    tracing::info!("monitor loop received shutdown signal");
+                }
+                result = monitor::run_monitor_loop(brain) => {
+                    if let Err(e) = result {
+                        error!("monitor loop exited with error: {e}");
+                    }
+                }
             }
         }
     });
@@ -141,7 +165,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     let api_handle = tokio::spawn({
         let brain = brain.clone();
         async move {
-            if let Err(e) = api::serve(brain).await {
+            if let Err(e) = api::serve(brain, scheduler_sender).await {
                 error!("API server exited with error: {e}");
             }
         }
@@ -169,13 +193,41 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         }
     }
 
-    // Graceful shutdown.
+    // ── Graceful Shutdown Sequence ────────────────────────────────────
     info!("initiating graceful shutdown");
+
+    // Step 1: Journal the shutdown event.
     journal.emit(crawl_types::JournalEventKind::SystemShutdown, None, None, serde_json::json!({}))?;
 
+    // Step 2: Signal all subsystems to stop (scheduler drains, monitor stops).
+    let _ = brain.shutdown_tx.send(true);
+    info!("shutdown signal sent to all subsystems");
+
+    // Step 3: Kill all running WASM Cells by advancing the wasmtime epoch.
+    // Any Cell in-flight will trap at its next yield point.
+    brain.engine.kill_all_cells();
+
+    // Step 4: Give in-flight tasks a brief grace period to complete/checkpoint.
+    info!("waiting for in-flight tasks to complete (2s grace period)...");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Step 5: Explicitly unload all plugins (drops compiled Components).
+    brain.engine.unload_all();
+
+    // Step 6: Abort any remaining background tasks.
     monitor_handle.abort();
     api_handle.abort();
     scheduler_handle.abort();
+
+    // Wait briefly for abort to propagate.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        async {
+            let _ = monitor_handle.await;
+            let _ = api_handle.await;
+            let _ = scheduler_handle.await;
+        },
+    ).await;
 
     info!("crawl-brain shut down cleanly");
     Ok(())
@@ -188,7 +240,10 @@ pub struct BrainState {
     pub storage: storage::Storage,
     pub journal: Arc<journal::Journal>,
     pub engine: engine::PluginEngine,
-    pub ollama: ollama::OllamaClient,
+    pub ollama: Arc<ollama::OllamaClient>,
     pub inference: Option<Arc<inference::InferenceEngine>>,
-    pub memory: memory::MemorySystem,
+    pub memory: Arc<memory::MemorySystem>,
+    pub research: Arc<research::ResearchEngine>,
+    /// Send `true` to trigger graceful shutdown of all subsystems.
+    pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
