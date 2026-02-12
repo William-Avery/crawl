@@ -105,7 +105,7 @@ impl Default for OllamaConfig {
     fn default() -> Self {
         Self {
             base_url: "http://localhost:11434".into(),
-            model: "glm4:latest".into(),
+            model: "glm-4.7-flash:latest".into(),
             rate_limit_rps: 5.0,
             default_max_tokens: 2048,
             timeout_ms: 60_000,
