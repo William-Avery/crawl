@@ -16,9 +16,13 @@ pub struct BrainConfig {
     #[serde(default)]
     pub paths: PathsConfig,
 
-    /// Ollama LLM settings.
+    /// Ollama LLM settings (legacy, used as fallback if [llm] absent).
     #[serde(default)]
     pub ollama: OllamaConfig,
+
+    /// LLM provider pool settings (preferred over [ollama]).
+    #[serde(default)]
+    pub llm: Option<LlmConfig>,
 
     /// ONNX inference settings.
     #[serde(default)]
@@ -358,6 +362,49 @@ impl Default for MaturityThresholds {
     }
 }
 
+// ── LLM Provider Pool Config ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// Daily budget in USD. Cloud providers are skipped when exceeded.
+    #[serde(default = "default_daily_budget")]
+    pub daily_budget_usd: f64,
+    /// Ordered list of providers. First available provider is used.
+    pub providers: Vec<LlmProviderConfig>,
+}
+
+fn default_daily_budget() -> f64 {
+    5.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmProviderConfig {
+    /// Provider kind: "anthropic" or "ollama".
+    pub kind: String,
+    /// Model name (e.g. "claude-haiku-4-5-20251001" or "qwen2.5:14b").
+    pub model: String,
+    /// Base URL (required for ollama, ignored for anthropic).
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Maximum requests per second.
+    #[serde(default = "default_rps")]
+    pub rate_limit_rps: f64,
+    /// Request timeout in milliseconds.
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    /// Environment variable name holding the API key (for anthropic).
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+}
+
+fn default_rps() -> f64 {
+    5.0
+}
+
+fn default_timeout() -> u64 {
+    30_000
+}
+
 impl Default for AutonomyConfig {
     fn default() -> Self {
         Self {
@@ -370,6 +417,22 @@ impl Default for AutonomyConfig {
             reward: RewardConfig::default(),
             soul: SoulConfig::default(),
             wisdom: WisdomConfig::default(),
+        }
+    }
+}
+
+impl Default for BrainConfig {
+    fn default() -> Self {
+        Self {
+            daemon: DaemonConfig::default(),
+            paths: PathsConfig::default(),
+            ollama: OllamaConfig::default(),
+            llm: None,
+            inference: InferenceConfig::default(),
+            storage: StorageConfig::default(),
+            api: ApiConfig::default(),
+            monitor: MonitorConfig::default(),
+            autonomy: AutonomyConfig::default(),
         }
     }
 }
@@ -393,19 +456,24 @@ impl BrainConfig {
             Ok(Self::default())
         }
     }
-}
 
-impl Default for BrainConfig {
-    fn default() -> Self {
-        Self {
-            daemon: DaemonConfig::default(),
-            paths: PathsConfig::default(),
-            ollama: OllamaConfig::default(),
-            inference: InferenceConfig::default(),
-            storage: StorageConfig::default(),
-            api: ApiConfig::default(),
-            monitor: MonitorConfig::default(),
-            autonomy: AutonomyConfig::default(),
+    /// Return the effective LLM config: use `[llm]` if present, otherwise
+    /// synthesize a single-provider config from the legacy `[ollama]` section.
+    pub fn effective_llm_config(&self) -> LlmConfig {
+        if let Some(ref llm) = self.llm {
+            llm.clone()
+        } else {
+            LlmConfig {
+                daily_budget_usd: 0.0,
+                providers: vec![LlmProviderConfig {
+                    kind: "ollama".into(),
+                    model: self.ollama.model.clone(),
+                    base_url: Some(self.ollama.base_url.clone()),
+                    rate_limit_rps: self.ollama.rate_limit_rps,
+                    timeout_ms: self.ollama.timeout_ms,
+                    api_key_env: None,
+                }],
+            }
         }
     }
 }
@@ -433,6 +501,37 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         assert!(toml_str.contains("[daemon]"));
         assert!(toml_str.contains("[ollama]"));
+    }
+
+    #[test]
+    fn effective_llm_config_fallback_to_ollama() {
+        let config = BrainConfig::default();
+        assert!(config.llm.is_none());
+        let llm = config.effective_llm_config();
+        assert_eq!(llm.providers.len(), 1);
+        assert_eq!(llm.providers[0].kind, "ollama");
+        assert_eq!(llm.providers[0].model, config.ollama.model);
+    }
+
+    #[test]
+    fn effective_llm_config_uses_explicit() {
+        let mut config = BrainConfig::default();
+        config.llm = Some(LlmConfig {
+            daily_budget_usd: 5.0,
+            providers: vec![
+                LlmProviderConfig {
+                    kind: "anthropic".into(),
+                    model: "claude-haiku-4-5-20251001".into(),
+                    base_url: None,
+                    rate_limit_rps: 5.0,
+                    timeout_ms: 30000,
+                    api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                },
+            ],
+        });
+        let llm = config.effective_llm_config();
+        assert_eq!(llm.providers.len(), 1);
+        assert_eq!(llm.providers[0].kind, "anthropic");
     }
 
     #[test]

@@ -6,9 +6,9 @@ mod curiosity;
 mod engine;
 mod inference;
 mod journal;
+mod llm;
 mod memory;
 mod monitor;
-mod ollama;
 mod policy;
 mod research;
 mod reward;
@@ -110,9 +110,12 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     let plugins_loaded = engine.scan_plugins_dir(&config.paths.plugins_dir)?;
     info!(plugins_loaded, "WASM engine initialized");
 
-    // Initialize the Ollama client.
-    let ollama = Arc::new(ollama::OllamaClient::new(&config.ollama));
-    info!(model = %config.ollama.model, "Ollama client initialized");
+    // Initialize the LLM provider pool.
+    let llm = Arc::new(llm::LlmPool::new(&config.effective_llm_config())?);
+    info!(
+        primary = %llm.primary_provider_label(),
+        "LLM provider pool initialized"
+    );
 
     // Initialize inference (ONNX models) — non-fatal if models aren't present.
     let inference = match inference::InferenceEngine::new(&config) {
@@ -133,7 +136,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     // Initialize research engine.
     let research = Arc::new(research::ResearchEngine::new(
         memory.clone(),
-        ollama.clone(),
+        llm.clone(),
         inference.clone(),
         policy.allowed_network_domains.clone(),
     ));
@@ -159,7 +162,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         storage,
         journal: journal.clone(),
         engine,
-        ollama,
+        llm,
         inference,
         memory,
         research,
@@ -215,7 +218,7 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         let soul = soul::Soul::load(
             config.paths.soul_path.clone(),
             config.autonomy.soul.clone(),
-            brain.ollama.clone(),
+            brain.llm.clone(),
         )?;
         let loop_ = curiosity::CuriosityLoop::new(
             brain.clone(),
@@ -302,7 +305,7 @@ pub struct BrainState {
     pub storage: storage::Storage,
     pub journal: Arc<journal::Journal>,
     pub engine: engine::PluginEngine,
-    pub ollama: Arc<ollama::OllamaClient>,
+    pub llm: Arc<llm::LlmPool>,
     pub inference: Option<Arc<inference::InferenceEngine>>,
     pub memory: Arc<memory::MemorySystem>,
     pub research: Arc<research::ResearchEngine>,

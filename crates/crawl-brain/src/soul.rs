@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::SoulConfig;
-use crate::ollama::OllamaClient;
+use crate::llm::LlmPool;
 
 /// Context passed from the reward system after a reflection cycle.
 pub struct ReflectionContext {
@@ -27,12 +27,12 @@ pub struct Soul {
     path: PathBuf,
     config: SoulConfig,
     content: String,
-    ollama: Arc<OllamaClient>,
+    llm: Arc<LlmPool>,
 }
 
 impl Soul {
     /// Load soul.md from disk if it exists, otherwise start empty.
-    pub fn load(path: PathBuf, config: SoulConfig, ollama: Arc<OllamaClient>) -> Result<Self> {
+    pub fn load(path: PathBuf, config: SoulConfig, llm: Arc<LlmPool>) -> Result<Self> {
         let content = if path.exists() {
             std::fs::read_to_string(&path)
                 .with_context(|| format!("failed to read soul file: {}", path.display()))?
@@ -51,7 +51,7 @@ impl Soul {
             path,
             config,
             content,
-            ollama,
+            llm,
         })
     }
 
@@ -147,8 +147,8 @@ Respond ONLY with the new soul document content (markdown). No preamble."#,
             tainted: false,
         };
 
-        let ollama = self.ollama.clone();
-        let response = ollama
+        let llm = self.llm.clone();
+        let response = llm
             .query(&request)
             .await
             .context("soul evolution LLM query failed")?;

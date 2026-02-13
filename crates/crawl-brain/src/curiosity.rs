@@ -50,7 +50,7 @@ impl CuriosityLoop {
     ) -> Self {
         let reward_engine = RewardEngine::new(
             brain.storage.db.clone(),
-            brain.ollama.clone(),
+            brain.llm.clone(),
             brain.journal.clone(),
             brain.memory.clone(),
             brain.config.autonomy.reward.clone(),
@@ -161,8 +161,8 @@ impl CuriosityLoop {
             tainted: false, // trusted internal prompt
         };
 
-        let ollama = self.brain.ollama.clone();
-        let response = ollama.query(&request).await
+        let llm = self.brain.llm.clone();
+        let response = llm.query(&request).await
             .context("curiosity LLM query failed")?;
 
         // Parse response into proposed tasks.
@@ -357,8 +357,8 @@ impl CuriosityLoop {
         let memory_count = self.brain.memory.count().unwrap_or(0);
 
         // LLM usage.
-        let llm_queries = self.brain.ollama.total_queries();
-        let llm_tokens = self.brain.ollama.total_tokens();
+        let llm_queries = self.brain.llm.total_queries();
+        let llm_tokens = self.brain.llm.total_tokens();
 
         // Reward-enhanced context.
         let (scoreboard, entity_summary, reflection_notes) =

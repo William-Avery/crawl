@@ -16,7 +16,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::config::WisdomConfig;
-use crate::ollama::OllamaClient;
+use crate::llm::LlmPool;
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -285,7 +285,7 @@ impl WisdomSystem {
     /// Run LLM distillation on recent scored tasks to extract wisdom.
     pub(crate) async fn distill(
         &self,
-        ollama: &OllamaClient,
+        llm: &LlmPool,
         inputs: &[DistillationInput],
         existing: &[WisdomEntry],
     ) -> Result<Vec<DistilledWisdom>> {
@@ -357,7 +357,7 @@ Respond ONLY with the JSON array."#,
             tainted: false,
         };
 
-        let response = ollama
+        let response = llm
             .query(&request)
             .await
             .context("wisdom distillation LLM query failed")?;

@@ -37,8 +37,8 @@ impl BrainService for BrainServiceImpl {
             uptime_secs: self.start_time.elapsed().as_secs(),
             loaded_cells: self.brain.engine.list_plugins().len() as u32,
             total_tasks_completed: count_tasks_by_status(&self.brain, "completed"),
-            ollama_queries: self.brain.ollama.total_queries(),
-            ollama_tokens: self.brain.ollama.total_tokens(),
+            ollama_queries: self.brain.llm.total_queries(),
+            ollama_tokens: self.brain.llm.total_tokens(),
         }))
     }
 

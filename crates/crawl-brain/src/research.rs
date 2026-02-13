@@ -6,8 +6,8 @@ use crawl_types::LlmRequest;
 use std::sync::Arc;
 
 use crate::inference::InferenceEngine;
+use crate::llm::LlmPool;
 use crate::memory::MemorySystem;
-use crate::ollama::OllamaClient;
 
 /// Research tier levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,7 +37,7 @@ pub struct ResearchResult {
 /// The research engine orchestrates tiered lookups.
 pub struct ResearchEngine {
     memory: Arc<MemorySystem>,
-    ollama: Arc<OllamaClient>,
+    llm: Arc<LlmPool>,
     inference: Option<Arc<InferenceEngine>>,
     allowed_domains: Vec<String>,
 }
@@ -45,13 +45,13 @@ pub struct ResearchEngine {
 impl ResearchEngine {
     pub fn new(
         memory: Arc<MemorySystem>,
-        ollama: Arc<OllamaClient>,
+        llm: Arc<LlmPool>,
         inference: Option<Arc<InferenceEngine>>,
         allowed_domains: Vec<String>,
     ) -> Self {
         Self {
             memory,
-            ollama,
+            llm,
             inference,
             allowed_domains,
         }
@@ -90,7 +90,7 @@ impl ResearchEngine {
         // Tier 4: External model (Ollama).
         if max_tier >= ResearchTier::ExternalModel {
             let resp = self
-                .ollama
+                .llm
                 .query(&LlmRequest {
                     prompt: format!(
                         "Research query: {query}\n\nProvide a concise, factual answer."

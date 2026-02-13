@@ -17,6 +17,23 @@ rate_limit_rps = 5.0
 default_max_tokens = 2048
 timeout_ms = 60000
 
+[llm]
+daily_budget_usd = 5.0
+
+[[llm.providers]]
+kind = "anthropic"
+model = "claude-haiku-4-5-20251001"
+api_key_env = "ANTHROPIC_API_KEY"
+rate_limit_rps = 5.0
+timeout_ms = 30000
+
+[[llm.providers]]
+kind = "ollama"
+model = "qwen2.5:14b"
+base_url = "http://localhost:11434"
+rate_limit_rps = 5.0
+timeout_ms = 60000
+
 [inference]
 use_tensorrt = true
 use_cuda = true

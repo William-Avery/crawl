@@ -341,6 +341,9 @@ pub struct LlmResponse {
     pub tokens_used: u32,
     /// Whether this response is tainted (true if prompt was tainted).
     pub tainted: bool,
+    /// Cost in microdollars (1 USD = 1,000,000). 0 for free/local providers.
+    #[serde(default)]
+    pub cost_microdollars: u64,
 }
 
 // ── Taint Tracking ──────────────────────────────────────────────────

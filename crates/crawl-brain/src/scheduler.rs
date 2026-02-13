@@ -314,7 +314,7 @@ async fn execute_task(brain: &BrainState, task: &Task) -> Result<TaskResult> {
     // Build subsystem refs for the Cell.
     let subsystems = SubsystemRefs {
         memory: brain.memory.clone(),
-        ollama: brain.ollama.clone(),
+        llm: brain.llm.clone(),
         inference: brain.inference.clone(),
         journal: brain.journal.clone(),
         policy: policy.clone(),

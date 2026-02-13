@@ -11,8 +11,8 @@ use wasmtime::{Config, Engine, Store};
 use crate::config::BrainConfig;
 use crate::inference::InferenceEngine;
 use crate::journal::Journal;
+use crate::llm::LlmPool;
 use crate::memory::MemorySystem;
-use crate::ollama::OllamaClient;
 use crawl_types::{Budget, Capability, JournalEventKind, PolicyConfig};
 
 // ── Host-side WIT Bindings ──────────────────────────────────────────
@@ -34,7 +34,7 @@ pub(crate) use crawl::plugin::task_types as wit_task_types;
 #[derive(Clone)]
 pub struct SubsystemRefs {
     pub memory: Arc<MemorySystem>,
-    pub ollama: Arc<OllamaClient>,
+    pub llm: Arc<LlmPool>,
     pub inference: Option<Arc<InferenceEngine>>,
     pub journal: Arc<Journal>,
     pub policy: Arc<PolicyConfig>,
@@ -302,7 +302,11 @@ impl crawl::plugin::host_tools::Host for CellState {
         }
         let config = &self.subsystems.config;
         match key.as_str() {
-            "ollama.model" => Ok(Ok(config.ollama.model.clone())),
+            "ollama.model" => {
+                let model = self.subsystems.llm.ollama_model()
+                    .unwrap_or(&config.ollama.model);
+                Ok(Ok(model.to_string()))
+            }
             "ollama.base_url" => Ok(Ok(config.ollama.base_url.clone())),
             "paths.plugins_dir" => Ok(Ok(config.paths.plugins_dir.display().to_string())),
             "paths.workspace_dir" => Ok(Ok(config.paths.workspace_dir.display().to_string())),
@@ -412,8 +416,8 @@ impl crawl::plugin::llm_api::Host for CellState {
         };
 
         // Clone the Arc before awaiting to avoid holding &mut self across .await.
-        let ollama = self.subsystems.ollama.clone();
-        match ollama.query(&llm_req).await {
+        let llm = self.subsystems.llm.clone();
+        match llm.query(&llm_req).await {
             Ok(resp) => Ok(Ok(crawl::plugin::llm_api::LlmResponse {
                 text: resp.text,
                 tokens_used: resp.tokens_used,

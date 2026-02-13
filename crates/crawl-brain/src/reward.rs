@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use crate::config::RewardConfig;
 use crate::journal::Journal;
+use crate::llm::LlmPool;
 use crate::memory::MemorySystem;
-use crate::ollama::OllamaClient;
 use crate::soul::{ReflectionContext, Soul};
 use crate::wisdom::{DistillationInput, WisdomSystem};
 
@@ -60,7 +60,7 @@ struct AxisScores {
 
 pub struct RewardEngine {
     db: Arc<Mutex<Connection>>,
-    ollama: Arc<OllamaClient>,
+    llm: Arc<LlmPool>,
     journal: Arc<Journal>,
     memory: Arc<MemorySystem>,
     config: RewardConfig,
@@ -73,7 +73,7 @@ pub struct RewardEngine {
 impl RewardEngine {
     pub fn new(
         db: Arc<Mutex<Connection>>,
-        ollama: Arc<OllamaClient>,
+        llm: Arc<LlmPool>,
         journal: Arc<Journal>,
         memory: Arc<MemorySystem>,
         config: RewardConfig,
@@ -82,7 +82,7 @@ impl RewardEngine {
     ) -> Self {
         Self {
             db,
-            ollama,
+            llm,
             journal,
             memory,
             config,
@@ -395,8 +395,8 @@ Respond ONLY with the JSON object."#,
             tainted: false,
         };
 
-        let ollama = self.ollama.clone();
-        let response = ollama
+        let llm = self.llm.clone();
+        let response = llm
             .query(&request)
             .await
             .context("reflection LLM query failed")?;
@@ -504,8 +504,8 @@ Respond ONLY with the JSON object."#,
             let task_ids: Vec<String> = recent_scored.iter().map(|t| t.task_id.clone()).collect();
             let existing = wisdom.active_entries();
 
-            let ollama = self.ollama.clone();
-            match wisdom.distill(&ollama, &inputs, &existing).await {
+            let llm = self.llm.clone();
+            match wisdom.distill(&llm, &inputs, &existing).await {
                 Ok(distilled) => {
                     if !distilled.is_empty() {
                         match wisdom.apply_distilled(&distilled, &task_ids) {

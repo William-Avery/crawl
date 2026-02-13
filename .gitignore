@@ -3,6 +3,7 @@
 /data
 /workspace
 /plugins
+crawl.toml
 *.swp
 *.swo
 *~
