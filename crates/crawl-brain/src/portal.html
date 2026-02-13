@@ -300,8 +300,9 @@ function fmtBytes(b) {
   return (b / 1048576).toFixed(1) + ' MB';
 }
 
-function card(label, value, sub) {
-  return `<div class="card"><div class="card-label">${esc(label)}</div><div class="card-value">${value}</div>${sub ? `<div class="card-sub">${sub}</div>` : ''}</div>`;
+function card(label, value, sub, title) {
+  const tip = title ? ` title="${esc(title)}"` : '';
+  return `<div class="card"${tip}><div class="card-label">${esc(label)}</div><div class="card-value">${value}</div>${sub ? `<div class="card-sub">${sub}</div>` : ''}</div>`;
 }
 
 // --- Tab switching ---
@@ -335,7 +336,7 @@ function renderOverview(d) {
   const total = d.tasks.completed + d.tasks.pending + d.tasks.running + d.tasks.failed;
   let html = '<div class="cards">';
   html += card('Uptime', fmtUptime(d.uptime_secs));
-  html += card('EWMA', d.ewma.toFixed(3));
+  html += card('EWMA', d.ewma.toFixed(3), null, 'Exponentially Weighted Moving Average of task reward scores (0\u20131). Higher values shorten the think interval; lower values lengthen it.');
   html += card('Think Interval', d.think_interval_ms + 'ms');
   html += card('Tasks', total, `${d.tasks.completed} done, ${d.tasks.running} run, ${d.tasks.pending} pend, ${d.tasks.failed} fail`);
   if (d.metrics) {
