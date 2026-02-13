@@ -141,6 +141,7 @@ impl Storage {
 
             CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_tasks_cell_id ON tasks(cell_id);
+            CREATE INDEX IF NOT EXISTS idx_tasks_verb ON tasks(verb);
             CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind);
             CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
             CREATE INDEX IF NOT EXISTS idx_task_rewards_composite ON task_rewards(composite);

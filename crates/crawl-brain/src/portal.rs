@@ -37,10 +37,13 @@ struct PortalSnapshot {
     journal: Vec<JournalSnapshot>,
     llm: LlmSnapshot,
     memory_count: u64,
-    wisdom: Option<WisdomSnapshot>,
+    wisdom_full: Option<WisdomFull>,
     soul: String,
     scoreboard: Vec<ScoreboardSnapshot>,
     entities: Vec<EntitySnapshot>,
+    verb_stats: Vec<VerbStats>,
+    cell_stats: Vec<CellStats>,
+    metrics_history: Vec<MetricsHistoryPoint>,
 }
 
 #[derive(Serialize)]
@@ -96,18 +99,6 @@ struct LlmSnapshot {
     budget_spent_usd: f64,
 }
 
-#[derive(Serialize)]
-struct WisdomSnapshot {
-    entries: Vec<WisdomEntrySnapshot>,
-    maturity: String,
-}
-
-#[derive(Serialize)]
-struct WisdomEntrySnapshot {
-    kind: String,
-    content: String,
-    confidence: f64,
-}
 
 #[derive(Serialize)]
 struct ScoreboardSnapshot {
@@ -130,6 +121,56 @@ struct EntitySnapshot {
     description: String,
     confidence: f64,
     last_seen: String,
+}
+
+// --- Aggregate stats types ---
+
+#[derive(Serialize)]
+struct VerbStats {
+    verb: String,
+    total: u64,
+    completed: u64,
+    failed: u64,
+    success_rate: f64,
+    avg_duration_ms: f64,
+    avg_tool_calls: f64,
+    avg_bytes_read: f64,
+    avg_bytes_written: f64,
+    avg_llm_calls: f64,
+}
+
+#[derive(Serialize)]
+struct CellStats {
+    cell_id: String,
+    total: u64,
+    completed: u64,
+    failed: u64,
+    success_rate: f64,
+    avg_duration_ms: f64,
+}
+
+#[derive(Serialize)]
+struct MetricsHistoryPoint {
+    cpu_load_1m: f64,
+    mem_used_percent: f64,
+    recorded_at: String,
+}
+
+#[derive(Serialize)]
+struct WisdomEntryFull {
+    kind: String,
+    content: String,
+    confidence: f64,
+    times_confirmed: u32,
+    times_contradicted: u32,
+    tags: Vec<String>,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+struct WisdomFull {
+    entries: Vec<WisdomEntryFull>,
+    maturity: String,
 }
 
 // --- Tasks page types ---
@@ -286,22 +327,26 @@ async fn serve_state(State(state): State<PortalState>) -> Json<PortalSnapshot> {
     // Memory count
     let memory_count = brain.memory.count().unwrap_or(0) as u64;
 
-    // Wisdom
-    let wisdom = brain.wisdom.as_ref().map(|w| {
+    // Wisdom (full)
+    let wisdom_full = brain.wisdom.as_ref().map(|w| {
         let entries = w
             .active_entries()
             .into_iter()
-            .map(|e| WisdomEntrySnapshot {
+            .map(|e| WisdomEntryFull {
                 kind: format!("{}", e.kind),
                 content: e.content.clone(),
                 confidence: e.confidence,
+                times_confirmed: e.times_confirmed,
+                times_contradicted: e.times_contradicted,
+                tags: e.tags.clone(),
+                updated_at: e.updated_at.clone(),
             })
             .collect();
         let maturity = w
             .compute_maturity()
             .map(|l| l.name().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
-        WisdomSnapshot { entries, maturity }
+        WisdomFull { entries, maturity }
     });
 
     // Soul
@@ -334,6 +379,11 @@ async fn serve_state(State(state): State<PortalState>) -> Json<PortalSnapshot> {
         brain.config.autonomy.think_interval_ms
     };
 
+    // Aggregate stats
+    let verb_stats = query_verb_stats(brain);
+    let cell_stats = query_cell_stats(brain);
+    let metrics_history = query_metrics_history(brain);
+
     Json(PortalSnapshot {
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_secs: uptime,
@@ -351,10 +401,13 @@ async fn serve_state(State(state): State<PortalState>) -> Json<PortalSnapshot> {
         journal,
         llm,
         memory_count,
-        wisdom,
+        wisdom_full,
         soul,
         scoreboard,
         entities,
+        verb_stats,
+        cell_stats,
+        metrics_history,
     })
 }
 
@@ -430,6 +483,108 @@ fn query_entities(brain: &BrainState) -> Vec<EntitySnapshot> {
             description: row.get(2)?,
             confidence: row.get(3)?,
             last_seen: row.get(4)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Query per-verb aggregate stats, returning empty vec on any SQL error.
+fn query_verb_stats(brain: &BrainState) -> Vec<VerbStats> {
+    let db = brain.storage.db.lock();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT t.verb, \
+         COUNT(*) AS total, \
+         SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS completed, \
+         SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END) AS failed, \
+         COALESCE(AVG(tt.duration_ms), 0) AS avg_dur, \
+         COALESCE(AVG(tt.tool_calls_used), 0) AS avg_tools, \
+         COALESCE(AVG(tt.bytes_read), 0) AS avg_br, \
+         COALESCE(AVG(tt.bytes_written), 0) AS avg_bw, \
+         COALESCE(AVG(tt.llm_calls_used), 0) AS avg_llm \
+         FROM tasks t LEFT JOIN task_telemetry tt ON t.id = tt.task_id \
+         GROUP BY t.verb ORDER BY total DESC",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map([], |row| {
+        let total: i64 = row.get(1)?;
+        let completed: i64 = row.get(2)?;
+        let failed: i64 = row.get(3)?;
+        let success_rate = if total > 0 {
+            completed as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+        Ok(VerbStats {
+            verb: row.get(0)?,
+            total: total as u64,
+            completed: completed as u64,
+            failed: failed as u64,
+            success_rate,
+            avg_duration_ms: row.get(4)?,
+            avg_tool_calls: row.get(5)?,
+            avg_bytes_read: row.get(6)?,
+            avg_bytes_written: row.get(7)?,
+            avg_llm_calls: row.get(8)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Query per-cell aggregate stats, returning empty vec on any SQL error.
+fn query_cell_stats(brain: &BrainState) -> Vec<CellStats> {
+    let db = brain.storage.db.lock();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT t.cell_id, \
+         COUNT(*) AS total, \
+         SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS completed, \
+         SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END) AS failed, \
+         COALESCE(AVG(tt.duration_ms), 0) AS avg_dur \
+         FROM tasks t LEFT JOIN task_telemetry tt ON t.id = tt.task_id \
+         GROUP BY t.cell_id ORDER BY total DESC",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map([], |row| {
+        let total: i64 = row.get(1)?;
+        let completed: i64 = row.get(2)?;
+        let failed: i64 = row.get(3)?;
+        let success_rate = if total > 0 {
+            completed as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+        Ok(CellStats {
+            cell_id: row.get(0)?,
+            total: total as u64,
+            completed: completed as u64,
+            failed: failed as u64,
+            success_rate,
+            avg_duration_ms: row.get(4)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Query last 1 hour of metrics history for sparkline charts.
+fn query_metrics_history(brain: &BrainState) -> Vec<MetricsHistoryPoint> {
+    let db = brain.storage.db.lock();
+    let cutoff = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT cpu_load_1m, mem_used_percent, recorded_at \
+         FROM metrics_history WHERE recorded_at >= ?1 \
+         ORDER BY recorded_at ASC LIMIT 120",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map(rusqlite::params![cutoff], |row| {
+        Ok(MetricsHistoryPoint {
+            cpu_load_1m: row.get(0)?,
+            mem_used_percent: row.get(1)?,
+            recorded_at: row.get(2)?,
         })
     })
     .map(|rows| rows.filter_map(|r| r.ok()).collect())

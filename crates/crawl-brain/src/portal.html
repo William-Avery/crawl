@@ -55,42 +55,6 @@ h1 {
   display: none;
   font-size: 12px;
 }
-details {
-  margin: 2px 0;
-  padding-left: 16px;
-}
-details.root {
-  padding-left: 0;
-}
-summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 3px 6px;
-  border-radius: 3px;
-  user-select: none;
-  white-space: nowrap;
-}
-summary::-webkit-details-marker { display: none; }
-summary::before {
-  content: '\25b6';
-  display: inline-block;
-  width: 14px;
-  font-size: 10px;
-  color: var(--fg2);
-  transition: transform 0.1s;
-}
-details[open] > summary::before {
-  transform: rotate(90deg);
-}
-summary:hover { background: var(--bg2); }
-.leaf {
-  padding: 2px 6px 2px 22px;
-  color: var(--fg2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.leaf:hover { background: var(--bg2); }
 .status {
   display: inline-block;
   width: 8px;
@@ -118,16 +82,6 @@ summary:hover { background: var(--bg2); }
 .badge-red { background: #3d1418; color: var(--red); }
 .val { color: var(--accent); }
 .dim { color: var(--fg2); }
-.soul-text {
-  padding: 6px 12px 6px 22px;
-  color: var(--fg2);
-  font-style: italic;
-  max-height: 80px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 12px;
-}
 .bar-bg {
   display: inline-block;
   width: 60px;
@@ -143,6 +97,123 @@ summary:hover { background: var(--bg2); }
   border-radius: 4px;
   transition: width 0.3s;
 }
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tab {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--fg2);
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.tab:hover { color: var(--fg); }
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+/* Cards */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.card .card-label {
+  color: var(--fg2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.card .card-value {
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 600;
+}
+.card .card-sub {
+  color: var(--fg2);
+  font-size: 11px;
+  margin-top: 2px;
+}
+/* Tables */
+.section-title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+.data-table th {
+  text-align: left;
+  color: var(--fg2);
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.data-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #21262d;
+  color: var(--fg);
+}
+.data-table tr:hover td { background: var(--bg2); }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Soul block */
+.soul-block {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: var(--fg2);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+/* Sparkline canvas */
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 60px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.spark-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.spark-label {
+  color: var(--fg2);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
 </style>
 </head>
 <body>
@@ -152,25 +223,20 @@ summary:hover { background: var(--bg2); }
   <a href="/tasks" style="color:var(--accent);font-size:12px;margin-left:auto;text-decoration:none;opacity:0.8">Tasks &rarr;</a>
 </div>
 <div class="error-banner" id="error"></div>
-<div id="tree"></div>
+<div class="tabs" id="tab-bar">
+  <div class="tab active" data-tab="overview">Overview</div>
+  <div class="tab" data-tab="tasks">Tasks</div>
+  <div class="tab" data-tab="system">System</div>
+  <div class="tab" data-tab="intelligence">Intelligence</div>
+</div>
+<div id="tab-content"></div>
 
 <script>
 const POLL_MS = 2000;
-let openState = {};
+let currentTab = 'overview';
+let lastData = null;
 
-function saveOpen(root) {
-  root.querySelectorAll('details').forEach(d => {
-    if (d.dataset.key) openState[d.dataset.key] = d.open;
-  });
-}
-
-function restoreOpen(root) {
-  root.querySelectorAll('details').forEach(d => {
-    if (d.dataset.key && d.dataset.key in openState) {
-      d.open = openState[d.dataset.key];
-    }
-  });
-}
+// --- Helpers (kept) ---
 
 function ago(isoStr) {
   if (!isoStr) return '';
@@ -205,18 +271,8 @@ function esc(s) {
   return d.innerHTML;
 }
 
-function det(key, summary, children, defaultOpen) {
-  const o = defaultOpen === undefined ? true : defaultOpen;
-  return `<details data-key="${esc(key)}"${o ? ' open' : ''}><summary>${summary}</summary>${children}</details>`;
-}
-
-function leaf(text) {
-  return `<div class="leaf">${text}</div>`;
-}
-
 function statusDot(s) {
-  const cls = 'status s-' + s;
-  return `<span class="${cls}"></span>`;
+  return `<span class="status s-${s}"></span>`;
 }
 
 function badge(text, color) {
@@ -228,166 +284,337 @@ function memBar(pct) {
   return `<span class="bar-bg"><span class="bar-fill" style="width:${pct.toFixed(0)}%;background:${color}"></span></span>`;
 }
 
-function render(d) {
-  const tree = document.getElementById('tree');
-  saveOpen(tree);
+// --- New helpers ---
 
-  // Header
-  document.getElementById('title').textContent = 'crawl-brain';
-  document.getElementById('meta').textContent =
-    `v${d.version} | uptime ${fmtUptime(d.uptime_secs)} | EWMA ${d.ewma.toFixed(3)} | think ${d.think_interval_ms}ms`;
+function fmtDuration(ms) {
+  if (ms == null || ms === 0) return '-';
+  if (ms < 1000) return ms.toFixed(0) + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
 
+function fmtBytes(b) {
+  if (b == null || b === 0) return '-';
+  if (b < 1024) return b.toFixed(0) + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function card(label, value, sub) {
+  return `<div class="card"><div class="card-label">${esc(label)}</div><div class="card-value">${value}</div>${sub ? `<div class="card-sub">${sub}</div>` : ''}</div>`;
+}
+
+// --- Tab switching ---
+
+document.getElementById('tab-bar').addEventListener('click', function(e) {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  currentTab = tab.dataset.tab;
+  if (lastData) renderTab(lastData);
+});
+
+function renderTab(d) {
+  const el = document.getElementById('tab-content');
+  switch (currentTab) {
+    case 'overview': el.innerHTML = renderOverview(d); break;
+    case 'tasks': el.innerHTML = renderTasks(d); break;
+    case 'system': el.innerHTML = renderSystem(d); break;
+    case 'intelligence': el.innerHTML = renderIntelligence(d); break;
+  }
+  if (currentTab === 'system' && d.metrics_history && d.metrics_history.length > 1) {
+    drawSparkline('spark-cpu', d.metrics_history.map(p => p.cpu_load_1m), '#58a6ff');
+    drawSparkline('spark-mem', d.metrics_history.map(p => p.mem_used_percent), '#3fb950');
+  }
+}
+
+// --- Tab renderers ---
+
+function renderOverview(d) {
+  const total = d.tasks.completed + d.tasks.pending + d.tasks.running + d.tasks.failed;
+  let html = '<div class="cards">';
+  html += card('Uptime', fmtUptime(d.uptime_secs));
+  html += card('EWMA', d.ewma.toFixed(3));
+  html += card('Think Interval', d.think_interval_ms + 'ms');
+  html += card('Tasks', total, `${d.tasks.completed} done, ${d.tasks.running} run, ${d.tasks.pending} pend, ${d.tasks.failed} fail`);
+  if (d.metrics) {
+    html += card('CPU Load', d.metrics.cpu_load_1m.toFixed(2), '1m / 5m / 15m');
+    html += card('Memory', d.metrics.mem_used_percent.toFixed(1) + '%', Math.floor(d.metrics.mem_available_kb / 1024) + ' MB free');
+  }
+  html += card('LLM', d.llm.queries + ' queries', `${d.llm.tokens} tok, $${d.llm.budget_spent_usd.toFixed(4)}`);
+  html += card('Memory Entries', d.memory_count);
+  html += card('Cells', d.cells.length);
+  html += '</div>';
+
+  // Recent tasks table
+  if (d.recent_tasks.length > 0) {
+    html += '<div class="section-title">Recent Tasks</div>';
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Status</th><th>Verb</th><th>Cell</th><th>Description</th><th>Time</th>';
+    html += '</tr></thead><tbody>';
+    for (const t of d.recent_tasks) {
+      html += `<tr>
+        <td>${statusDot(t.status)} ${esc(t.status)}</td>
+        <td>${esc(t.verb)}</td>
+        <td><span class="val">${esc(t.cell_id)}</span></td>
+        <td>${esc(t.description)}</td>
+        <td class="dim">${ago(t.created_at) || fmtTime(t.created_at)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+  }
+  return html;
+}
+
+function renderTasks(d) {
   let html = '';
 
-  // Cells
-  {
-    let inner = '';
-    if (d.cells.length === 0) {
-      inner = leaf('<span class="dim">no cells loaded</span>');
-    } else {
-      for (const c of d.cells) {
-        const caps = c.capabilities.length ? c.capabilities.map(x => badge(x, 'blue')).join(' ') : '<span class="dim">none</span>';
-        inner += leaf(`<span class="val">${esc(c.id)}</span> ${caps}`);
-      }
+  // Per-verb breakdown
+  html += '<div class="section-title">Per-Verb Breakdown</div>';
+  if (d.verb_stats.length === 0) {
+    html += '<div class="dim" style="margin-bottom:16px">No task data yet.</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Verb</th><th class="num">Total</th><th class="num">Done</th><th class="num">Failed</th>';
+    html += '<th class="num">Success %</th><th class="num">Avg Duration</th>';
+    html += '<th class="num">Avg Tools</th><th class="num">Avg Read</th><th class="num">Avg Write</th><th class="num">Avg LLM</th>';
+    html += '</tr></thead><tbody>';
+    for (const v of d.verb_stats) {
+      const rateColor = v.success_rate >= 80 ? 'var(--green)' : v.success_rate >= 50 ? 'var(--yellow)' : 'var(--red)';
+      html += `<tr>
+        <td><strong>${esc(v.verb)}</strong></td>
+        <td class="num">${v.total}</td>
+        <td class="num">${v.completed}</td>
+        <td class="num">${v.failed}</td>
+        <td class="num" style="color:${rateColor}">${v.success_rate.toFixed(1)}%</td>
+        <td class="num">${fmtDuration(v.avg_duration_ms)}</td>
+        <td class="num">${v.avg_tool_calls.toFixed(1)}</td>
+        <td class="num">${fmtBytes(v.avg_bytes_read)}</td>
+        <td class="num">${fmtBytes(v.avg_bytes_written)}</td>
+        <td class="num">${v.avg_llm_calls.toFixed(1)}</td>
+      </tr>`;
     }
-    html += det('cells', `Cells <span class="dim">(${d.cells.length})</span>`, inner);
+    html += '</tbody></table>';
   }
 
-  // Tasks
-  {
-    const total = d.tasks.completed + d.tasks.pending + d.tasks.running + d.tasks.failed;
-    let parts = [];
-    if (d.tasks.completed) parts.push(`${d.tasks.completed} completed`);
-    if (d.tasks.pending) parts.push(`${d.tasks.pending} pending`);
-    if (d.tasks.running) parts.push(`${d.tasks.running} running`);
-    if (d.tasks.failed) parts.push(`${d.tasks.failed} failed`);
-    const summary = parts.join(', ') || 'none';
-
-    let recent = '';
-    if (d.recent_tasks.length > 0) {
-      let items = '';
-      for (const t of d.recent_tasks) {
-        const timeStr = ago(t.created_at) || fmtTime(t.created_at);
-        items += leaf(
-          `${statusDot(t.status)}<span class="dim">[${esc(t.status)}]</span> ` +
-          `${esc(t.verb)} <span class="val">${esc(t.cell_id)}</span>: ${esc(t.description)} ` +
-          `<span class="dim">(${timeStr})</span>`
-        );
-      }
-      recent = det('tasks-recent', `Recent <span class="dim">(${d.recent_tasks.length})</span>`, items);
+  // Per-cell breakdown
+  html += '<div class="section-title">Per-Cell Breakdown</div>';
+  if (d.cell_stats.length === 0) {
+    html += '<div class="dim" style="margin-bottom:16px">No task data yet.</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Cell</th><th class="num">Total</th><th class="num">Done</th><th class="num">Failed</th>';
+    html += '<th class="num">Success %</th><th class="num">Avg Duration</th>';
+    html += '</tr></thead><tbody>';
+    for (const c of d.cell_stats) {
+      const rateColor = c.success_rate >= 80 ? 'var(--green)' : c.success_rate >= 50 ? 'var(--yellow)' : 'var(--red)';
+      html += `<tr>
+        <td><span class="val">${esc(c.cell_id)}</span></td>
+        <td class="num">${c.total}</td>
+        <td class="num">${c.completed}</td>
+        <td class="num">${c.failed}</td>
+        <td class="num" style="color:${rateColor}">${c.success_rate.toFixed(1)}%</td>
+        <td class="num">${fmtDuration(c.avg_duration_ms)}</td>
+      </tr>`;
     }
-
-    html += det('tasks', `Tasks <span class="dim">(${summary})</span>`, recent);
+    html += '</tbody></table>';
   }
+  return html;
+}
 
-  // Entities
-  {
-    let inner = '';
-    if (d.entities.length === 0) {
-      inner = leaf('<span class="dim">none discovered</span>');
-    } else {
-      for (const e of d.entities) {
-        const desc = e.description ? `: ${esc(e.description)}` : '';
-        inner += leaf(
-          `<span class="val">${esc(e.name)}</span> ` +
-          `${badge(e.kind, 'purple')}${desc} ` +
-          `<span class="dim">[${e.confidence.toFixed(2)}] ${ago(e.last_seen)}</span>`
-        );
-      }
-    }
-    html += det('entities', `Entities <span class="dim">(${d.entities.length})</span>`, inner);
-  }
+function renderSystem(d) {
+  let html = '';
 
-  // System Metrics
+  // Metrics cards
   if (d.metrics) {
     const m = d.metrics;
-    const memFreeMB = Math.floor(m.mem_available_kb / 1024);
-    const inner =
-      leaf(`CPU: <span class="val">${m.cpu_load_1m.toFixed(2)}</span> / ${m.cpu_load_5m.toFixed(2)} / ${m.cpu_load_15m.toFixed(2)}`) +
-      leaf(`Memory: <span class="val">${m.mem_used_percent.toFixed(1)}%</span> ${memBar(m.mem_used_percent)} <span class="dim">(${memFreeMB} MB free)</span>`);
-    html += det('metrics', 'System Metrics', inner);
+    html += '<div class="cards">';
+    html += card('CPU 1m', m.cpu_load_1m.toFixed(2));
+    html += card('CPU 5m', m.cpu_load_5m.toFixed(2));
+    html += card('CPU 15m', m.cpu_load_15m.toFixed(2));
+    html += card('Memory', m.mem_used_percent.toFixed(1) + '%', Math.floor(m.mem_available_kb / 1024) + ' MB free');
+    html += card('System Uptime', fmtUptime(Math.floor(m.uptime_secs)));
+    html += '</div>';
   }
 
-  // Journal
-  {
-    let inner = '';
-    if (d.journal.length === 0) {
-      inner = leaf('<span class="dim">no events</span>');
-    } else {
-      for (const e of d.journal) {
-        const ts = fmtTime(e.timestamp);
-        const cell = e.cell_id ? ` <span class="val">${esc(e.cell_id)}</span>` : '';
-        inner += leaf(`<span class="dim">${ts}</span> ${esc(e.kind)}${cell}`);
-      }
+  // Sparkline charts
+  if (d.metrics_history && d.metrics_history.length > 1) {
+    html += '<div class="spark-row">';
+    html += '<div><div class="spark-label">CPU Load (1h)</div><canvas id="spark-cpu" class="sparkline"></canvas></div>';
+    html += '<div><div class="spark-label">Memory % (1h)</div><canvas id="spark-mem" class="sparkline"></canvas></div>';
+    html += '</div>';
+  }
+
+  // Entities table
+  html += '<div class="section-title">Entities (' + d.entities.length + ')</div>';
+  if (d.entities.length === 0) {
+    html += '<div class="dim" style="margin-bottom:16px">None discovered.</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Name</th><th>Kind</th><th>Description</th><th class="num">Confidence</th><th>Last Seen</th>';
+    html += '</tr></thead><tbody>';
+    for (const e of d.entities) {
+      html += `<tr>
+        <td><span class="val">${esc(e.name)}</span></td>
+        <td>${badge(e.kind, 'purple')}</td>
+        <td>${esc(e.description)}</td>
+        <td class="num">${e.confidence.toFixed(2)}</td>
+        <td class="dim">${ago(e.last_seen)}</td>
+      </tr>`;
     }
-    html += det('journal', `Journal <span class="dim">(${d.journal.length} events)</span>`, inner);
+    html += '</tbody></table>';
   }
 
-  // LLM
-  {
-    html += det('llm',
-      `LLM <span class="dim">${esc(d.llm.provider)}, ${d.llm.queries} queries, $${d.llm.budget_spent_usd.toFixed(4)}</span>`,
-      leaf(`Queries: <span class="val">${d.llm.queries}</span>`) +
-      leaf(`Tokens: <span class="val">${d.llm.tokens}</span>`) +
-      leaf(`Budget: <span class="val">$${d.llm.budget_spent_usd.toFixed(4)}</span>`),
-      false
-    );
+  // Journal events table
+  html += '<div class="section-title">Journal (' + d.journal.length + ' events)</div>';
+  if (d.journal.length === 0) {
+    html += '<div class="dim" style="margin-bottom:16px">No events.</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Time</th><th>Kind</th><th>Cell</th><th>Task</th>';
+    html += '</tr></thead><tbody>';
+    for (const e of d.journal) {
+      html += `<tr>
+        <td class="dim">${fmtTime(e.timestamp)}</td>
+        <td>${esc(e.kind)}</td>
+        <td>${e.cell_id ? `<span class="val">${esc(e.cell_id)}</span>` : '<span class="dim">-</span>'}</td>
+        <td>${e.task_id ? esc(e.task_id) : '<span class="dim">-</span>'}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
   }
+  return html;
+}
 
-  // Memory
-  html += det('memory',
-    `Memory <span class="dim">(${d.memory_count} entries)</span>`,
-    leaf(`Total entries: <span class="val">${d.memory_count}</span>`),
-    false
-  );
+function renderIntelligence(d) {
+  let html = '';
 
-  // Wisdom
-  if (d.wisdom) {
-    const w = d.wisdom;
-    let inner = leaf(`Maturity: ${badge(w.maturity, 'green')}`);
-    if (w.entries.length > 0) {
+  // Wisdom entries
+  const w = d.wisdom_full;
+  if (w) {
+    html += '<div class="section-title">Wisdom (' + w.entries.length + ' entries, ' + esc(w.maturity) + ')</div>';
+    if (w.entries.length === 0) {
+      html += '<div class="dim" style="margin-bottom:16px">No wisdom entries.</div>';
+    } else {
+      html += '<table class="data-table"><thead><tr>';
+      html += '<th>Kind</th><th>Content</th><th class="num">Confidence</th>';
+      html += '<th class="num">Confirmed</th><th class="num">Contradicted</th><th>Tags</th><th>Updated</th>';
+      html += '</tr></thead><tbody>';
       for (const e of w.entries) {
         const kindColor = e.kind === 'constraint' ? 'red' : e.kind === 'pattern' ? 'yellow' : 'blue';
-        inner += leaf(
-          `${badge(e.kind, kindColor)} ${esc(e.content)} ` +
-          `<span class="dim">(${e.confidence.toFixed(2)})</span>`
-        );
+        const tags = e.tags.length > 0 ? e.tags.map(t => badge(t, 'purple')).join(' ') : '<span class="dim">-</span>';
+        html += `<tr>
+          <td>${badge(e.kind, kindColor)}</td>
+          <td>${esc(e.content)}</td>
+          <td class="num">${e.confidence.toFixed(2)}</td>
+          <td class="num">${e.times_confirmed}</td>
+          <td class="num">${e.times_contradicted}</td>
+          <td>${tags}</td>
+          <td class="dim">${ago(e.updated_at)}</td>
+        </tr>`;
       }
-    } else {
-      inner += leaf('<span class="dim">no entries</span>');
+      html += '</tbody></table>';
     }
-    html += det('wisdom', `Wisdom <span class="dim">(${w.entries.length} entries, ${esc(w.maturity)})</span>`, inner);
+  } else {
+    html += '<div class="dim" style="margin-bottom:16px">Wisdom system not active.</div>';
   }
 
   // Soul
-  {
-    const soulPreview = d.soul ? d.soul.substring(0, 120).replace(/\n/g, ' ') + (d.soul.length > 120 ? '...' : '') : 'not set';
-    let inner = `<div class="soul-text">${esc(d.soul || 'No soul file found.')}</div>`;
-    html += det('soul', `Soul <span class="dim">${esc(soulPreview)}</span>`, inner, false);
-  }
+  html += '<div class="section-title">Soul</div>';
+  html += `<div class="soul-block">${esc(d.soul || 'No soul file found.')}</div>`;
 
   // Scoreboard
-  {
-    let inner = '';
-    if (d.scoreboard.length === 0) {
-      inner = leaf('<span class="dim">no scored tasks</span>');
-    } else {
-      for (const s of d.scoreboard) {
-        inner += leaf(
-          `<span class="val">${s.composite.toFixed(3)}</span> ` +
-          `${esc(s.verb)} ${esc(s.target)} ` +
-          `<span class="dim">N=${s.novelty.toFixed(2)} A=${s.anomaly.toFixed(2)} ` +
-          `C=${s.confidence.toFixed(2)} Act=${s.actionability.toFixed(2)} ` +
-          `E=${s.efficiency.toFixed(2)}</span>`
-        );
-      }
+  html += '<div class="section-title">Scoreboard (top ' + d.scoreboard.length + ')</div>';
+  if (d.scoreboard.length === 0) {
+    html += '<div class="dim" style="margin-bottom:16px">No scored tasks.</div>';
+  } else {
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>Task</th><th>Verb</th><th>Target</th><th class="num">Composite</th>';
+    html += '<th class="num">Novelty</th><th class="num">Anomaly</th><th class="num">Confidence</th>';
+    html += '<th class="num">Actionability</th><th class="num">Efficiency</th><th>Scored</th>';
+    html += '</tr></thead><tbody>';
+    for (const s of d.scoreboard) {
+      html += `<tr>
+        <td class="dim">${esc(s.task_id)}</td>
+        <td>${esc(s.verb)}</td>
+        <td>${esc(s.target)}</td>
+        <td class="num val">${s.composite.toFixed(3)}</td>
+        <td class="num">${s.novelty.toFixed(2)}</td>
+        <td class="num">${s.anomaly.toFixed(2)}</td>
+        <td class="num">${s.confidence.toFixed(2)}</td>
+        <td class="num">${s.actionability.toFixed(2)}</td>
+        <td class="num">${s.efficiency.toFixed(2)}</td>
+        <td class="dim">${ago(s.scored_at)}</td>
+      </tr>`;
     }
-    html += det('scoreboard', `Scoreboard <span class="dim">(top ${d.scoreboard.length})</span>`, inner, false);
+    html += '</tbody></table>';
   }
-
-  tree.innerHTML = html;
-  restoreOpen(tree);
+  return html;
 }
+
+// --- Sparkline drawing ---
+
+function drawSparkline(canvasId, values, hexColor) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || values.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width;
+  const h = rect.height;
+  const pad = 4;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Fill area
+  ctx.beginPath();
+  for (let i = 0; i < values.length; i++) {
+    const x = pad + (i / (values.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((values[i] - min) / range) * (h - 2 * pad);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(pad + (w - 2 * pad), h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = hexColor + '18';
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  for (let i = 0; i < values.length; i++) {
+    const x = pad + (i / (values.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((values[i] - min) / range) * (h - 2 * pad);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = hexColor;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Current value label
+  const last = values[values.length - 1];
+  ctx.fillStyle = hexColor;
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(last.toFixed(1), w - pad, 12);
+
+  // Min/max labels
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(min.toFixed(1), pad, h - pad + 1);
+  ctx.textAlign = 'right';
+  ctx.fillText(max.toFixed(1), w - pad, h - pad + 1);
+}
+
+// --- Polling ---
 
 let errorCount = 0;
 
@@ -396,7 +623,14 @@ async function poll() {
     const resp = await fetch('/api/state');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    render(data);
+    lastData = data;
+
+    // Header
+    document.getElementById('title').textContent = 'crawl-brain';
+    document.getElementById('meta').textContent =
+      `v${data.version} | uptime ${fmtUptime(data.uptime_secs)} | EWMA ${data.ewma.toFixed(3)} | think ${data.think_interval_ms}ms`;
+
+    renderTab(data);
     errorCount = 0;
     document.getElementById('error').style.display = 'none';
   } catch (e) {
