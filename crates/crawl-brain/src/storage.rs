@@ -117,6 +117,7 @@ impl Storage {
                 anomaly REAL NOT NULL DEFAULT 0.0,
                 confidence REAL NOT NULL DEFAULT 0.0,
                 actionability REAL NOT NULL DEFAULT 0.0,
+                efficiency REAL NOT NULL DEFAULT 0.0,
                 composite REAL NOT NULL DEFAULT 0.0,
                 scoring_method TEXT NOT NULL DEFAULT 'rule',
                 scoring_detail TEXT NOT NULL DEFAULT '{}',
@@ -146,6 +147,21 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_research_query ON research_results(query);
             CREATE INDEX IF NOT EXISTS idx_wisdom_kind ON wisdom_entries(kind);
             CREATE INDEX IF NOT EXISTS idx_wisdom_active ON wisdom_entries(active);
+
+            CREATE TABLE IF NOT EXISTS task_telemetry (
+                task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                duration_ms INTEGER NOT NULL,
+                tool_calls_used INTEGER NOT NULL DEFAULT 0,
+                bytes_read INTEGER NOT NULL DEFAULT 0,
+                bytes_written INTEGER NOT NULL DEFAULT 0,
+                network_calls_used INTEGER NOT NULL DEFAULT 0,
+                llm_calls_used INTEGER NOT NULL DEFAULT 0,
+                cpu_load_at_start REAL,
+                cpu_load_at_end REAL,
+                mem_used_percent_at_start REAL,
+                mem_used_percent_at_end REAL,
+                completed_at TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS metrics_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

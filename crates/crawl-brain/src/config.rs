@@ -245,6 +245,9 @@ pub struct RewardConfig {
     pub confidence_weight: f32,
     /// Weight for actionability axis in composite score.
     pub actionability_weight: f32,
+    /// Weight for resource efficiency axis in composite score.
+    #[serde(default = "default_efficiency_weight")]
+    pub efficiency_weight: f32,
     /// Run LLM reflection every N think cycles.
     pub llm_reflect_every_n_cycles: u32,
     /// Max tokens for LLM reflection response.
@@ -265,10 +268,11 @@ impl Default for RewardConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            novelty_weight: 0.30,
-            anomaly_weight: 0.25,
+            novelty_weight: 0.25,
+            anomaly_weight: 0.20,
             confidence_weight: 0.20,
-            actionability_weight: 0.25,
+            actionability_weight: 0.20,
+            efficiency_weight: 0.15,
             llm_reflect_every_n_cycles: 10,
             max_reflection_tokens: 512,
             scoreboard_size: 15,
@@ -395,6 +399,10 @@ pub struct LlmProviderConfig {
     /// Environment variable name holding the API key (for anthropic).
     #[serde(default)]
     pub api_key_env: Option<String>,
+}
+
+fn default_efficiency_weight() -> f32 {
+    0.15
 }
 
 fn default_rps() -> f64 {

@@ -7,7 +7,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::engine::{wit_task_types, SubsystemRefs};
+use crate::engine::{wit_task_types, ExecutionTelemetry, SubsystemRefs};
+use crate::monitor;
 use crate::BrainState;
 
 /// Task priority levels.
@@ -321,8 +322,11 @@ async fn execute_task(brain: &BrainState, task: &Task) -> Result<TaskResult> {
         config: brain.config.clone(),
     };
 
+    // Snapshot system metrics before execution.
+    let pre_metrics = monitor::collect_metrics_snapshot().ok();
+
     // Execute the plugin.
-    let wit_result = brain.engine.execute_plugin(
+    let (wit_result, telemetry) = brain.engine.execute_plugin(
         &task.cell_id,
         wit_task,
         capabilities,
@@ -330,20 +334,33 @@ async fn execute_task(brain: &BrainState, task: &Task) -> Result<TaskResult> {
         subsystems,
     ).await?;
 
+    // Snapshot system metrics after execution.
+    let post_metrics = monitor::collect_metrics_snapshot().ok();
+
     let duration = start.elapsed();
 
     // Convert WIT result back to crawl_types::TaskResult.
     match wit_result {
         wit_task_types::TaskResult::Completed(output_json) => {
             let output: serde_json::Value = serde_json::from_str(&output_json).unwrap_or_default();
+            let duration_ms = duration.as_millis() as u64;
+
+            // Persist telemetry to task_telemetry table.
+            persist_task_telemetry(
+                brain, task.id, duration_ms, &telemetry,
+                pre_metrics.as_ref(), post_metrics.as_ref(),
+            );
+
             Ok(TaskResult::Completed {
                 task_id: task.id,
                 verb: task.verb,
                 output,
-                duration_ms: duration.as_millis() as u64,
-                tool_calls_used: 0, // TODO: read from CellState after execution
-                bytes_read: 0,
-                bytes_written: 0,
+                duration_ms,
+                tool_calls_used: telemetry.tool_calls_used,
+                bytes_read: telemetry.bytes_read,
+                bytes_written: telemetry.bytes_written,
+                network_calls_used: telemetry.network_calls_used,
+                llm_calls_used: telemetry.llm_calls_used,
             })
         }
         wit_task_types::TaskResult::Checkpointed(cp) => {
@@ -396,5 +413,34 @@ fn persist_task_result(brain: &BrainState, task_id: Uuid, result: &TaskResult) {
     let _ = db.execute(
         "UPDATE tasks SET status = ?1, result = ?2, completed_at = ?3 WHERE id = ?4",
         rusqlite::params![status, result_json, completed_at, task_id.to_string()],
+    );
+}
+
+/// Persist per-task execution telemetry to the task_telemetry table.
+fn persist_task_telemetry(
+    brain: &BrainState,
+    task_id: Uuid,
+    duration_ms: u64,
+    telemetry: &ExecutionTelemetry,
+    pre_metrics: Option<&monitor::MetricsSnapshot>,
+    post_metrics: Option<&monitor::MetricsSnapshot>,
+) {
+    let db = brain.storage.db.lock();
+    let _ = db.execute(
+        "INSERT OR REPLACE INTO task_telemetry (task_id, duration_ms, tool_calls_used, bytes_read, bytes_written, network_calls_used, llm_calls_used, cpu_load_at_start, cpu_load_at_end, mem_used_percent_at_start, mem_used_percent_at_end, completed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        rusqlite::params![
+            task_id.to_string(),
+            duration_ms as i64,
+            telemetry.tool_calls_used as i64,
+            telemetry.bytes_read as i64,
+            telemetry.bytes_written as i64,
+            telemetry.network_calls_used as i64,
+            telemetry.llm_calls_used as i64,
+            pre_metrics.map(|m| m.cpu_load_1m),
+            post_metrics.map(|m| m.cpu_load_1m),
+            pre_metrics.map(|m| m.mem_used_percent),
+            post_metrics.map(|m| m.mem_used_percent),
+            chrono::Utc::now().to_rfc3339(),
+        ],
     );
 }

@@ -325,4 +325,12 @@ message ScoreboardEntry {
     double actionability = 7;
     double composite = 8;
     string scored_at = 9;
+    double efficiency = 10;
+    // Execution telemetry (populated when available).
+    uint32 tool_calls_used = 11;
+    uint64 bytes_read = 12;
+    uint64 bytes_written = 13;
+    uint32 network_calls_used = 14;
+    uint32 llm_calls_used = 15;
+    uint64 duration_ms = 16;
 }

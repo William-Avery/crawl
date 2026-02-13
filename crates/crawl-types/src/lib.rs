@@ -151,6 +151,8 @@ pub enum TaskResult {
         tool_calls_used: u32,
         bytes_read: u64,
         bytes_written: u64,
+        network_calls_used: u32,
+        llm_calls_used: u32,
     },
     /// Task was interrupted and checkpointed.
     Checkpointed {
@@ -590,6 +592,8 @@ mod tests {
             tool_calls_used: 3,
             bytes_read: 1024,
             bytes_written: 0,
+            network_calls_used: 1,
+            llm_calls_used: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"status\":\"Completed\""));

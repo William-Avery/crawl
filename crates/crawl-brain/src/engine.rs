@@ -27,6 +27,18 @@ wasmtime::component::bindgen!({
 // Re-export WIT types for use by scheduler and other modules.
 pub(crate) use crawl::plugin::task_types as wit_task_types;
 
+// ── Execution Telemetry ─────────────────────────────────────────────
+
+/// Per-task execution telemetry extracted from CellState after WASM execution.
+#[derive(Debug, Clone, Default)]
+pub struct ExecutionTelemetry {
+    pub tool_calls_used: u32,
+    pub bytes_read: u64,
+    pub bytes_written: u64,
+    pub network_calls_used: u32,
+    pub llm_calls_used: u32,
+}
+
 // ── Subsystem References ────────────────────────────────────────────
 
 /// Shared subsystem references passed into each Cell execution.
@@ -537,6 +549,7 @@ impl PluginEngine {
     }
 
     /// Instantiate a plugin and execute a task.
+    /// Returns the WIT TaskResult and telemetry extracted from the CellState.
     pub async fn execute_plugin(
         &self,
         cell_id: &str,
@@ -544,7 +557,7 @@ impl PluginEngine {
         capabilities: std::collections::HashSet<Capability>,
         budget: Budget,
         subsystems: SubsystemRefs,
-    ) -> Result<crawl::plugin::task_types::TaskResult> {
+    ) -> Result<(crawl::plugin::task_types::TaskResult, ExecutionTelemetry)> {
         let plugin = self.plugins.read().get(cell_id).cloned()
             .ok_or_else(|| anyhow::anyhow!("plugin '{}' not loaded", cell_id))?;
 
@@ -568,8 +581,17 @@ impl PluginEngine {
         let result = instance.crawl_plugin_plugin_api().call_execute(&mut store, &task).await
             .with_context(|| format!("WASM execute call failed for {cell_id}"))?;
 
+        // Extract telemetry from CellState before the Store is dropped.
+        let telemetry = ExecutionTelemetry {
+            tool_calls_used: store.data().tool_calls_used,
+            bytes_read: store.data().bytes_read,
+            bytes_written: store.data().bytes_written,
+            network_calls_used: store.data().network_calls_used,
+            llm_calls_used: store.data().llm_calls_used,
+        };
+
         tracing::debug!(cell_id, "execute completed");
-        Ok(result)
+        Ok((result, telemetry))
     }
 
     pub fn scan_plugins_dir(&self, dir: &Path) -> Result<usize> {

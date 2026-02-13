@@ -122,6 +122,7 @@ pub struct DistillationInput {
     pub anomaly: f64,
     pub confidence: f64,
     pub actionability: f64,
+    pub efficiency: f64,
     pub outcome_summary: String,
 }
 
@@ -297,7 +298,7 @@ impl WisdomSystem {
         let mut task_lines = String::new();
         for input in inputs {
             task_lines.push_str(&format!(
-                "- [{}] target={} score={:.2} (N={:.1}/A={:.1}/C={:.1}/Act={:.1}) outcome={}\n",
+                "- [{}] target={} score={:.2} (N={:.1}/A={:.1}/C={:.1}/Act={:.1}/Eff={:.1}) outcome={}\n",
                 input.verb,
                 input.target,
                 input.composite,
@@ -305,6 +306,7 @@ impl WisdomSystem {
                 input.anomaly,
                 input.confidence,
                 input.actionability,
+                input.efficiency,
                 truncate_str(&input.outcome_summary, 120),
             ));
         }

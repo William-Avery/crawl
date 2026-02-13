@@ -393,6 +393,9 @@ impl CuriosityLoop {
             _ => (String::new(), String::new()),
         };
 
+        // Telemetry cost summary from task_telemetry table.
+        let telemetry_summary = self.build_telemetry_summary().unwrap_or_default();
+
         Ok(ObservationContext {
             cpu_load_1m: metrics.cpu_load_1m,
             cpu_load_5m: metrics.cpu_load_5m,
@@ -416,6 +419,7 @@ impl CuriosityLoop {
             soul,
             wisdom_summary,
             maturity_level,
+            telemetry_summary,
         })
     }
 
@@ -505,6 +509,12 @@ impl CuriosityLoop {
             format!("\n{}\n", ctx.wisdom_summary)
         };
 
+        let telemetry_section = if ctx.telemetry_summary.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}\nUse this to estimate which tasks are cheap vs expensive.\n", ctx.telemetry_summary)
+        };
+
         format!(
 r#"You are the reasoning core of a local system observer called "crawl-brain".
 You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this machine — understand what's running, what's normal, what's unusual, and learn about the system over time.
@@ -524,7 +534,7 @@ You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this m
 
 ## Recent Task Results
 {results}
-{scoreboard}{entities}{reflection}
+{scoreboard}{entities}{reflection}{telemetry}
 ## What You Can Do
 You can submit tasks to loaded Cells using these verbs: {verbs}.
 Each task needs: cell_id, verb, description, target, and optionally a hypothesis.
@@ -566,6 +576,7 @@ Respond ONLY with the JSON array, no other text."#,
             scoreboard = scoreboard_section,
             entities = entity_section,
             reflection = reflection_section,
+            telemetry = telemetry_section,
             verbs = allowed_verbs_str,
         )
     }
@@ -762,6 +773,41 @@ Respond ONLY with the JSON array, no other text."#,
             .collect();
 
         Ok(results)
+    }
+
+    /// Build a per-verb telemetry cost summary from the task_telemetry table.
+    fn build_telemetry_summary(&self) -> Result<String> {
+        let db = self.brain.storage.db.lock();
+        let mut stmt = db.prepare(
+            "SELECT t.verb, COUNT(*) as cnt,
+                    AVG(tt.duration_ms) as avg_dur,
+                    AVG(tt.tool_calls_used) as avg_tools,
+                    AVG(tt.bytes_read) as avg_read,
+                    AVG(tt.llm_calls_used) as avg_llm
+             FROM task_telemetry tt
+             JOIN tasks t ON t.id = tt.task_id
+             GROUP BY t.verb
+             ORDER BY cnt DESC"
+        )?;
+
+        let rows: Vec<String> = stmt.query_map([], |row| {
+            let verb: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            let avg_dur: f64 = row.get(2)?;
+            let avg_tools: f64 = row.get(3)?;
+            let avg_read: f64 = row.get(4)?;
+            let avg_llm: f64 = row.get(5)?;
+            Ok(format!(
+                "  - {} (n={}): avg {:.0}ms, {:.1} tool calls, {:.0} bytes read, {:.1} LLM calls",
+                verb.trim_matches('"'), count, avg_dur, avg_tools, avg_read, avg_llm
+            ))
+        })?.filter_map(|r| r.ok()).collect();
+
+        if rows.is_empty() {
+            return Ok(String::new());
+        }
+
+        Ok(format!("## Resource Cost by Verb\n{}", rows.join("\n")))
     }
 
     // ── Training pipeline orchestration ─────────────────────────────
@@ -983,4 +1029,5 @@ struct ObservationContext {
     soul: String,
     wisdom_summary: String,
     maturity_level: String,
+    telemetry_summary: String,
 }

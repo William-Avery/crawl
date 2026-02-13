@@ -35,6 +35,7 @@ struct ScoredTask {
     anomaly: f64,
     confidence: f64,
     actionability: f64,
+    efficiency: f64,
 }
 
 /// An unscored completed task ready for evaluation.
@@ -56,6 +57,16 @@ struct AxisScores {
     anomaly: f64,
     confidence: f64,
     actionability: f64,
+    efficiency: f64,
+}
+
+/// Per-task telemetry fetched from the task_telemetry table.
+struct TaskTelemetry {
+    tool_calls_used: u32,
+    bytes_read: u64,
+    bytes_written: u64,
+    network_calls_used: u32,
+    llm_calls_used: u32,
 }
 
 pub struct RewardEngine {
@@ -154,13 +165,14 @@ impl RewardEngine {
         {
             let db = self.db.lock();
             db.execute(
-                "INSERT OR REPLACE INTO task_rewards (task_id, novelty, anomaly, confidence, actionability, composite, scoring_method, scoring_detail, entities_found, scored_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT OR REPLACE INTO task_rewards (task_id, novelty, anomaly, confidence, actionability, efficiency, composite, scoring_method, scoring_detail, entities_found, scored_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 rusqlite::params![
                     task.id,
                     axes.novelty,
                     axes.anomaly,
                     axes.confidence,
                     axes.actionability,
+                    axes.efficiency,
                     composite,
                     "rule",
                     serde_json::to_string(&detail)?,
@@ -180,6 +192,7 @@ impl RewardEngine {
                 "anomaly": axes.anomaly,
                 "confidence": axes.confidence,
                 "actionability": axes.actionability,
+                "efficiency": axes.efficiency,
                 "composite": composite,
                 "entities_found": entities_found,
             }),
@@ -199,7 +212,7 @@ impl RewardEngine {
     pub fn build_scoreboard(&self) -> Result<String> {
         let db = self.db.lock();
         let mut stmt = db.prepare(
-            "SELECT tr.task_id, t.verb, t.target, t.description, tr.composite, tr.novelty, tr.anomaly, tr.confidence, tr.actionability
+            "SELECT tr.task_id, t.verb, t.target, t.description, tr.composite, tr.novelty, tr.anomaly, tr.confidence, tr.actionability, tr.efficiency
              FROM task_rewards tr
              JOIN tasks t ON t.id = tr.task_id
              ORDER BY tr.scored_at DESC
@@ -218,6 +231,7 @@ impl RewardEngine {
                     anomaly: row.get(6)?,
                     confidence: row.get(7)?,
                     actionability: row.get(8)?,
+                    efficiency: row.get(9)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -230,7 +244,7 @@ impl RewardEngine {
             return Ok(String::new());
         }
 
-        let mut out = String::from("Task | Verb | Target | Score | N/A/C/Act\n");
+        let mut out = String::from("Task | Verb | Target | Score | N/A/C/Act/Eff\n");
         out.push_str("---|---|---|---|---\n");
 
         for t in &tasks {
@@ -245,7 +259,7 @@ impl RewardEngine {
                 t.description.clone()
             };
             out.push_str(&format!(
-                "{}.. | {} | {} | {:.2} | {:.1}/{:.1}/{:.1}/{:.1}\n",
+                "{}.. | {} | {} | {:.2} | {:.1}/{:.1}/{:.1}/{:.1}/{:.1}\n",
                 short_id,
                 t.verb.trim_matches('"'),
                 truncate_str(&t.target, 20),
@@ -254,6 +268,7 @@ impl RewardEngine {
                 t.anomaly,
                 t.confidence,
                 t.actionability,
+                t.efficiency,
             ));
             let _ = short_desc; // description available but scoreboard uses target for brevity
         }
@@ -347,7 +362,7 @@ impl RewardEngine {
         for t in &recent_scored {
             let output_preview = self.fetch_task_output_preview(&t.task_id, 500)?;
             task_lines.push_str(&format!(
-                "- [{}] {} target={} composite={:.2} (N={:.1} A={:.1} C={:.1} Act={:.1})\n  Output: {}\n",
+                "- [{}] {} target={} composite={:.2} (N={:.1} A={:.1} C={:.1} Act={:.1} Eff={:.1})\n  Output: {}\n",
                 t.verb.trim_matches('"'),
                 truncate_str(&t.description, 60),
                 truncate_str(&t.target, 30),
@@ -356,6 +371,7 @@ impl RewardEngine {
                 t.anomaly,
                 t.confidence,
                 t.actionability,
+                t.efficiency,
                 output_preview,
             ));
         }
@@ -496,6 +512,7 @@ Respond ONLY with the JSON object."#,
                         anomaly: t.anomaly,
                         confidence: t.confidence,
                         actionability: t.actionability,
+                        efficiency: t.efficiency,
                         outcome_summary: outcome,
                     }
                 })
@@ -613,11 +630,13 @@ Respond ONLY with the JSON object."#,
 
     /// Compute axis scores for a task.
     fn compute_axes(&self, task: &UnscoredTask, output: &Value, verb: Option<TaskVerb>) -> AxisScores {
+        let telemetry = self.fetch_task_telemetry(&task.id).ok().flatten();
         AxisScores {
             novelty: self.score_novelty(task, output, verb).clamp(0.0, 1.0),
             anomaly: self.score_anomaly(output, verb).clamp(0.0, 1.0),
             confidence: self.score_confidence(task, output).clamp(0.0, 1.0),
             actionability: self.score_actionability(task, output, verb).clamp(0.0, 1.0),
+            efficiency: self.score_efficiency(task, telemetry.as_ref()).clamp(0.0, 1.0),
         }
     }
 
@@ -830,8 +849,88 @@ Respond ONLY with the JSON object."#,
         (axes.novelty * c.novelty_weight as f64
             + axes.anomaly * c.anomaly_weight as f64
             + axes.confidence * c.confidence_weight as f64
-            + axes.actionability * c.actionability_weight as f64)
+            + axes.actionability * c.actionability_weight as f64
+            + axes.efficiency * c.efficiency_weight as f64)
             .clamp(0.0, 1.0)
+    }
+
+    /// Resource efficiency: How frugally did this task use its budget?
+    fn score_efficiency(&self, task: &UnscoredTask, telemetry: Option<&TaskTelemetry>) -> f64 {
+        let Some(tel) = telemetry else {
+            return 0.5; // no telemetry — neutral score
+        };
+
+        let budget: Value = serde_json::from_str(&task.budget).unwrap_or_default();
+        let mut scores = Vec::new();
+
+        // Tool call efficiency: 1.0 - (used / max). Fewer calls = more efficient.
+        if let Some(max_tool) = budget.get("max_tool_calls").and_then(|v| v.as_u64()) {
+            if max_tool > 0 {
+                let ratio = tel.tool_calls_used as f64 / max_tool as f64;
+                scores.push(1.0 - ratio.min(1.0));
+            }
+        }
+
+        // Read I/O efficiency.
+        if let Some(max_read) = budget.get("max_bytes_read").and_then(|v| v.as_u64()) {
+            if max_read > 0 {
+                let ratio = tel.bytes_read as f64 / max_read as f64;
+                scores.push(1.0 - ratio.min(1.0));
+            }
+        }
+
+        // Write I/O efficiency.
+        if let Some(max_write) = budget.get("max_bytes_written").and_then(|v| v.as_u64()) {
+            if max_write > 0 {
+                let ratio = tel.bytes_written as f64 / max_write as f64;
+                scores.push(1.0 - ratio.min(1.0));
+            }
+        }
+
+        // Network call efficiency.
+        if let Some(max_net) = budget.get("max_network_calls").and_then(|v| v.as_u64()) {
+            if max_net > 0 {
+                let ratio = tel.network_calls_used as f64 / max_net as f64;
+                scores.push(1.0 - ratio.min(1.0));
+            }
+        }
+
+        // LLM call efficiency.
+        if let Some(max_llm) = budget.get("max_llm_calls").and_then(|v| v.as_u64()) {
+            if max_llm > 0 {
+                let ratio = tel.llm_calls_used as f64 / max_llm as f64;
+                scores.push(1.0 - ratio.min(1.0));
+            }
+        }
+
+        if scores.is_empty() {
+            return 0.5; // no budget limits to compare against
+        }
+
+        scores.iter().sum::<f64>() / scores.len() as f64
+    }
+
+    /// Fetch telemetry for a task from the task_telemetry table.
+    fn fetch_task_telemetry(&self, task_id: &str) -> Result<Option<TaskTelemetry>> {
+        let db = self.db.lock();
+        let result = db.query_row(
+            "SELECT tool_calls_used, bytes_read, bytes_written, network_calls_used, llm_calls_used FROM task_telemetry WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| {
+                Ok(TaskTelemetry {
+                    tool_calls_used: row.get::<_, i64>(0)? as u32,
+                    bytes_read: row.get::<_, i64>(1)? as u64,
+                    bytes_written: row.get::<_, i64>(2)? as u64,
+                    network_calls_used: row.get::<_, i64>(3)? as u32,
+                    llm_calls_used: row.get::<_, i64>(4)? as u32,
+                })
+            },
+        );
+        match result {
+            Ok(t) => Ok(Some(t)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ── Entity Extraction ───────────────────────────────────────────
@@ -988,7 +1087,7 @@ Respond ONLY with the JSON object."#,
     fn fetch_recent_scored(&self, limit: usize) -> Result<Vec<ScoredTask>> {
         let db = self.db.lock();
         let mut stmt = db.prepare(
-            "SELECT tr.task_id, t.verb, t.target, t.description, tr.composite, tr.novelty, tr.anomaly, tr.confidence, tr.actionability
+            "SELECT tr.task_id, t.verb, t.target, t.description, tr.composite, tr.novelty, tr.anomaly, tr.confidence, tr.actionability, tr.efficiency
              FROM task_rewards tr
              JOIN tasks t ON t.id = tr.task_id
              ORDER BY tr.scored_at DESC
@@ -1007,6 +1106,7 @@ Respond ONLY with the JSON object."#,
                     anomaly: row.get(6)?,
                     confidence: row.get(7)?,
                     actionability: row.get(8)?,
+                    efficiency: row.get(9)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -1136,14 +1236,17 @@ mod tests {
             anomaly: 0.6,
             confidence: 0.7,
             actionability: 0.5,
+            efficiency: 0.9,
         };
         let composite = (engine_axes.novelty * config.novelty_weight as f64
             + engine_axes.anomaly * config.anomaly_weight as f64
             + engine_axes.confidence * config.confidence_weight as f64
-            + engine_axes.actionability * config.actionability_weight as f64)
+            + engine_axes.actionability * config.actionability_weight as f64
+            + engine_axes.efficiency * config.efficiency_weight as f64)
             .clamp(0.0, 1.0);
-        // 0.8*0.3 + 0.6*0.25 + 0.7*0.2 + 0.5*0.25 = 0.24 + 0.15 + 0.14 + 0.125 = 0.655
-        assert!((composite - 0.655).abs() < 0.01);
+        // 0.8*0.25 + 0.6*0.20 + 0.7*0.20 + 0.5*0.20 + 0.9*0.15
+        // = 0.20 + 0.12 + 0.14 + 0.10 + 0.135 = 0.695
+        assert!((composite - 0.695).abs() < 0.01);
     }
 
     #[test]

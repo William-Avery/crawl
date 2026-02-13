@@ -680,8 +680,12 @@ impl BrainService for BrainServiceImpl {
         let db = self.brain.storage.db.lock();
         let mut stmt = db.prepare(
             "SELECT r.task_id, t.verb, t.target, r.novelty, r.anomaly, r.confidence, \
-             r.actionability, r.composite, r.scored_at \
-             FROM task_rewards r JOIN tasks t ON r.task_id = t.id \
+             r.actionability, r.composite, r.scored_at, r.efficiency, \
+             tt.tool_calls_used, tt.bytes_read, tt.bytes_written, \
+             tt.network_calls_used, tt.llm_calls_used, tt.duration_ms \
+             FROM task_rewards r \
+             JOIN tasks t ON r.task_id = t.id \
+             LEFT JOIN task_telemetry tt ON r.task_id = tt.task_id \
              ORDER BY r.composite DESC LIMIT ?1"
         ).map_err(|e| Status::internal(e.to_string()))?;
 
@@ -696,6 +700,13 @@ impl BrainService for BrainServiceImpl {
                 actionability: row.get(6)?,
                 composite: row.get(7)?,
                 scored_at: row.get(8)?,
+                efficiency: row.get::<_, Option<f64>>(9)?.unwrap_or(0.0),
+                tool_calls_used: row.get::<_, Option<i64>>(10)?.unwrap_or(0) as u32,
+                bytes_read: row.get::<_, Option<i64>>(11)?.unwrap_or(0) as u64,
+                bytes_written: row.get::<_, Option<i64>>(12)?.unwrap_or(0) as u64,
+                network_calls_used: row.get::<_, Option<i64>>(13)?.unwrap_or(0) as u32,
+                llm_calls_used: row.get::<_, Option<i64>>(14)?.unwrap_or(0) as u32,
+                duration_ms: row.get::<_, Option<i64>>(15)?.unwrap_or(0) as u64,
             })
         }).map_err(|e| Status::internal(e.to_string()))?
         .filter_map(|r| r.ok())
