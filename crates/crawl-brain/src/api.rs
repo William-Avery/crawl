@@ -59,7 +59,7 @@ impl BrainService for BrainServiceImpl {
             "MAINTAIN" => crawl_types::TaskVerb::Maintain,
             "TRAIN" => crawl_types::TaskVerb::Train,
             "UPDATE" => crawl_types::TaskVerb::Update,
-            "CRUD" => crawl_types::TaskVerb::Crud,
+            "RESEARCH" => crawl_types::TaskVerb::Research,
             other => return Err(Status::invalid_argument(format!("unknown verb: {other}"))),
         };
 

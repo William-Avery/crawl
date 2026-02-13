@@ -87,6 +87,7 @@ impl MaturityLevel {
         let mut verbs = vec!["IDENTIFY".to_string(), "MONITOR".to_string()];
         if *self >= MaturityLevel::Investigator {
             verbs.push("PROCURE".to_string());
+            verbs.push("RESEARCH".to_string());
         }
         if *self >= MaturityLevel::Caretaker {
             verbs.push("MAINTAIN".to_string());
@@ -640,13 +641,13 @@ mod tests {
         assert_eq!(obs, vec!["IDENTIFY", "MONITOR"]);
 
         let inv = MaturityLevel::Investigator.unlocked_verbs();
-        assert_eq!(inv, vec!["IDENTIFY", "MONITOR", "PROCURE"]);
+        assert_eq!(inv, vec!["IDENTIFY", "MONITOR", "PROCURE", "RESEARCH"]);
 
         let ct = MaturityLevel::Caretaker.unlocked_verbs();
-        assert_eq!(ct, vec!["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN"]);
+        assert_eq!(ct, vec!["IDENTIFY", "MONITOR", "PROCURE", "RESEARCH", "MAINTAIN"]);
 
         let bld = MaturityLevel::Builder.unlocked_verbs();
-        assert_eq!(bld, vec!["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "TRAIN", "UPDATE"]);
+        assert_eq!(bld, vec!["IDENTIFY", "MONITOR", "PROCURE", "RESEARCH", "MAINTAIN", "TRAIN", "UPDATE"]);
     }
 
     #[test]

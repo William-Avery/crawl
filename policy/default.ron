@@ -55,6 +55,13 @@ PolicyConfig(
             memory_access,
             llm_query,
         ],
+        "research": [
+            filesystem_read,
+            network_get,
+            llm_query,
+            memory_access,
+            journal_emit,
+        ],
     },
     allowed_read_paths: [
         "/proc",

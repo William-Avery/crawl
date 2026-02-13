@@ -241,7 +241,7 @@ fn convert_verb(verb: TaskVerb) -> wit_task_types::TaskVerb {
         TaskVerb::Maintain => wit_task_types::TaskVerb::Maintain,
         TaskVerb::Train => wit_task_types::TaskVerb::Train,
         TaskVerb::Update => wit_task_types::TaskVerb::Update,
-        TaskVerb::Crud => wit_task_types::TaskVerb::Crud,
+        TaskVerb::Research => wit_task_types::TaskVerb::Research,
     }
 }
 

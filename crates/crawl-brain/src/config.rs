@@ -430,8 +430,8 @@ impl Default for AutonomyConfig {
             max_tokens_per_think: 1024,
             temperature: 0.4,
             allowed_verbs: vec![
-                "IDENTIFY".into(), "MONITOR".into(), "PROCURE".into(),
-                "MAINTAIN".into(), "TRAIN".into(), "UPDATE".into(),
+                "IDENTIFY".into(), "MONITOR".into(), "RESEARCH".into(),
+                "PROCURE".into(), "MAINTAIN".into(), "TRAIN".into(), "UPDATE".into(),
             ],
             reward: RewardConfig::default(),
             soul: SoulConfig::default(),

@@ -538,7 +538,7 @@ You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this m
 ## What You Can Do
 You can submit tasks to loaded Cells using these verbs: {verbs}.
 Each task needs: cell_id, verb, description, target, and optionally a hypothesis.
-For PROCURE/MAINTAIN/TRAIN/UPDATE tasks, always include a hypothesis explaining what you expect to learn or achieve.
+For RESEARCH/PROCURE/MAINTAIN/TRAIN/UPDATE tasks, always include a hypothesis explaining what you expect to learn or achieve.
 
 ## Instructions
 Think about what would be interesting or useful to investigate right now.
@@ -653,7 +653,7 @@ Respond ONLY with the JSON array, no other text."#,
             "MAINTAIN" => TaskVerb::Maintain,
             "TRAIN" => TaskVerb::Train,
             "UPDATE" => TaskVerb::Update,
-            "CRUD" => TaskVerb::Crud,
+            "RESEARCH" => TaskVerb::Research,
             other => anyhow::bail!("unknown verb '{other}'"),
         };
 
@@ -1002,16 +1002,16 @@ fn graduated_budget(verb: &TaskVerb) -> Budget {
             max_tokens_per_call: 2048,
             risk_tier: RiskTier::High,
         },
-        _ => Budget {
-            time_budget_ms: Some(30_000),
+        TaskVerb::Research => Budget {
+            time_budget_ms: Some(90_000),   // 90s — web lookups can be slow
             deadline_at: None,
-            max_tool_calls: 50,
-            max_bytes_read: 5 * 1024 * 1024,
-            max_bytes_written: 0,
-            max_network_calls: 0,
-            max_llm_calls: 0,
-            max_tokens_per_call: 0,
-            risk_tier: RiskTier::Low,
+            max_tool_calls: 150,
+            max_bytes_read: 10 * 1024 * 1024,
+            max_bytes_written: 1024 * 1024,
+            max_network_calls: 10,          // up to 10 HTTP GETs
+            max_llm_calls: 5,               // synthesize findings
+            max_tokens_per_call: 2048,
+            risk_tier: RiskTier::Medium,
         },
     }
 }

@@ -53,9 +53,9 @@ Every Cell task must declare exactly one verb:
 | **MONITOR** | Observe state over time (resources, logs, file drift, network listeners) | Returns snapshot + trend data + baseline updates + anomaly signals |
 | **PROCURE** | Collect minimal diagnostic evidence | Minimal data only, redaction enforced, agent-owned storage, hash + provenance recorded |
 | **MAINTAIN** | Keep agent ecosystem healthy (cache pruning, index rebuild, model rotation, GC, storage optimization) | Returns maintenance report + what changed + space reclaimed |
+| **RESEARCH** | Deep-dive knowledge gathering from external sources | Tiered: memory → web (allowlisted) → LLM synthesis. All web content tainted. Returns findings + synthesis + confidence + sources |
 | **BUILD** | Create new artifacts in sandbox (scripts, parsers, plugins) | Sandbox only, must include tests, no host execution. Returns artifact proposal + test results + risk classification + rollback plan |
 | **UPDATE** | Propose modifications to skills or Brain code | Git diff only, sandbox CI, atomic deployment, rollback retained, user/policy approval required |
-| **CRUD** | Data operations on agent workspace / permitted dirs / structured stores | CREATE: logged+budgeted. READ: scoped+redacted. UPDATE: structured patch, journaled. DELETE: only via GC tool, only agent-owned, tombstone logged |
 
 ---
 

@@ -50,6 +50,7 @@ const PLUGIN_CRATES: &[&str] = &[
     "crates/crawl-plugin-procure",
     "crates/crawl-plugin-maintain",
     "crates/crawl-plugin-update",
+    "crates/crawl-plugin-research",
 ];
 
 fn build_plugins() -> Result<()> {

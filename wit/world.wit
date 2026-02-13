@@ -14,7 +14,7 @@ interface task-types {
         maintain,
         train,
         update,
-        crud,
+        research,
     }
 
     /// Risk tier for a task.

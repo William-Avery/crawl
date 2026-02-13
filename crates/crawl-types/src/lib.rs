@@ -22,8 +22,8 @@ pub enum TaskVerb {
     Train,
     /// Propose modifications to skills or Brain code.
     Update,
-    /// Data operations on agent workspace / permitted dirs / structured stores.
-    Crud,
+    /// Deep-dive knowledge gathering from external sources.
+    Research,
 }
 
 impl TaskVerb {
