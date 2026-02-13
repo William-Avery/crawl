@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crawl-brain tasks</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1c2129;
+  --border: #30363d;
+  --fg: #c9d1d9;
+  --fg2: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --blue: #58a6ff;
+  --purple: #bc8cff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.6;
+  padding: 16px 24px;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.header h1 { font-size: 16px; font-weight: 600; color: var(--accent); }
+.header .meta { color: var(--fg2); font-size: 12px; }
+
+.filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filters select, .filters button {
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.filters select:focus, .filters button:focus { outline: 1px solid var(--accent); }
+.filters button:hover { background: var(--bg3); }
+.filters label { color: var(--fg2); font-size: 12px; }
+
+.error-banner {
+  background: #3d1418;
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  display: none;
+  font-size: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border);
+  color: var(--fg2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+tr.task-row { cursor: pointer; }
+tr.task-row:hover { background: var(--bg2); }
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.s-completed { background: var(--green); }
+.s-pending { background: var(--yellow); }
+.s-running { background: var(--blue); }
+.s-failed { background: var(--red); }
+
+.detail-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+.detail-panel {
+  background: var(--bg2);
+  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 20px;
+}
+.detail-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--fg2);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.detail-section pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 12px;
+}
+.telemetry-grid .item { color: var(--fg2); font-size: 12px; }
+.telemetry-grid .val { color: var(--accent); }
+.dim { color: var(--fg2); }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--fg2);
+}
+.pagination button {
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+.pagination button:not(:disabled):hover { background: var(--bg3); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>crawl-brain</h1>
+  <span class="meta"><a href="/">&larr; Dashboard</a></span>
+  <span class="meta" id="meta"></span>
+</div>
+<div class="error-banner" id="error"></div>
+
+<div class="filters">
+  <label>Status</label>
+  <select id="f-status">
+    <option value="">All</option>
+    <option value="pending">Pending</option>
+    <option value="running">Running</option>
+    <option value="completed">Completed</option>
+    <option value="failed">Failed</option>
+  </select>
+  <label>Verb</label>
+  <select id="f-verb">
+    <option value="">All</option>
+    <option value="IDENTIFY">IDENTIFY</option>
+    <option value="MONITOR">MONITOR</option>
+    <option value="PROCURE">PROCURE</option>
+    <option value="MAINTAIN">MAINTAIN</option>
+    <option value="RESEARCH">RESEARCH</option>
+    <option value="TRAIN">TRAIN</option>
+    <option value="UPDATE">UPDATE</option>
+  </select>
+  <button id="btn-apply" onclick="applyFilters()">Apply</button>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Verb</th>
+      <th>Cell</th>
+      <th>Target</th>
+      <th>Status</th>
+      <th>Created</th>
+      <th>Duration</th>
+      <th>Tool Calls</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+
+<div class="pagination">
+  <button id="btn-prev" onclick="prevPage()" disabled>&laquo; Prev</button>
+  <span id="page-info"></span>
+  <button id="btn-next" onclick="nextPage()">Next &raquo;</button>
+</div>
+
+<script>
+const POLL_MS = 3000;
+const PAGE_SIZE = 100;
+let currentOffset = 0;
+let totalTasks = 0;
+let expandedId = null;
+
+function getFilters() {
+  return {
+    status: document.getElementById('f-status').value,
+    verb: document.getElementById('f-verb').value,
+  };
+}
+
+function applyFilters() {
+  currentOffset = 0;
+  poll();
+}
+
+function prevPage() {
+  currentOffset = Math.max(0, currentOffset - PAGE_SIZE);
+  poll();
+}
+
+function nextPage() {
+  if (currentOffset + PAGE_SIZE < totalTasks) {
+    currentOffset += PAGE_SIZE;
+    poll();
+  }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function ago(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 0) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function fmtDuration(ms) {
+  if (ms == null) return '-';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
+
+function fmtJson(s) {
+  if (!s) return '-';
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch { return s; }
+}
+
+function render(data) {
+  totalTasks = data.total;
+  const tasks = data.tasks;
+  const tbody = document.getElementById('tbody');
+
+  let html = '';
+  for (const t of tasks) {
+    const shortId = t.id.length > 8 ? t.id.substring(0, 8) : t.id;
+    const dotCls = 's-' + t.status;
+    html += `<tr class="task-row" data-id="${esc(t.id)}" onclick="toggleDetail(this)">
+      <td title="${esc(t.id)}"><span class="dim">${esc(shortId)}</span></td>
+      <td>${esc(t.verb)}</td>
+      <td>${esc(t.cell_id)}</td>
+      <td title="${esc(t.target)}">${esc(t.target)}</td>
+      <td><span class="status-dot ${dotCls}"></span>${esc(t.status)}</td>
+      <td title="${esc(t.created_at)}">${ago(t.created_at)}</td>
+      <td>${fmtDuration(t.duration_ms)}</td>
+      <td>${t.tool_calls_used != null ? t.tool_calls_used : '-'}</td>
+    </tr>`;
+
+    // Detail row (hidden by default)
+    const isExpanded = expandedId === t.id;
+    html += `<tr class="detail-row" data-detail="${esc(t.id)}" style="display:${isExpanded ? 'table-row' : 'none'}">
+      <td colspan="8">
+        <div class="detail-panel">
+          <div class="detail-section">
+            <h3>Description</h3>
+            <pre>${esc(t.description)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Telemetry</h3>
+            <div class="telemetry-grid">
+              <div class="item">Duration: <span class="val">${fmtDuration(t.duration_ms)}</span></div>
+              <div class="item">Tool calls: <span class="val">${t.tool_calls_used != null ? t.tool_calls_used : '-'}</span></div>
+              <div class="item">Bytes read: <span class="val">${t.bytes_read != null ? t.bytes_read : '-'}</span></div>
+              <div class="item">Bytes written: <span class="val">${t.bytes_written != null ? t.bytes_written : '-'}</span></div>
+              <div class="item">Net calls: <span class="val">${t.network_calls_used != null ? t.network_calls_used : '-'}</span></div>
+              <div class="item">LLM calls: <span class="val">${t.llm_calls_used != null ? t.llm_calls_used : '-'}</span></div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>Params</h3>
+            <pre>${esc(fmtJson(t.params))}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Result</h3>
+            <pre>${esc(fmtJson(t.result))}</pre>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+
+  // Pagination
+  const page = Math.floor(currentOffset / PAGE_SIZE) + 1;
+  const pages = Math.max(1, Math.ceil(totalTasks / PAGE_SIZE));
+  document.getElementById('page-info').textContent = `Page ${page} of ${pages} (${totalTasks} tasks)`;
+  document.getElementById('btn-prev').disabled = currentOffset === 0;
+  document.getElementById('btn-next').disabled = currentOffset + PAGE_SIZE >= totalTasks;
+}
+
+function toggleDetail(row) {
+  const id = row.dataset.id;
+  const detailRow = document.querySelector(`tr[data-detail="${id}"]`);
+  if (!detailRow) return;
+  if (expandedId === id) {
+    expandedId = null;
+    detailRow.style.display = 'none';
+  } else {
+    // Collapse previous
+    if (expandedId) {
+      const prev = document.querySelector(`tr[data-detail="${expandedId}"]`);
+      if (prev) prev.style.display = 'none';
+    }
+    expandedId = id;
+    detailRow.style.display = 'table-row';
+  }
+}
+
+let errorCount = 0;
+
+async function poll() {
+  try {
+    const f = getFilters();
+    const params = new URLSearchParams();
+    params.set('limit', PAGE_SIZE);
+    params.set('offset', currentOffset);
+    if (f.status) params.set('status', f.status);
+    if (f.verb) params.set('verb', f.verb);
+
+    const resp = await fetch('/api/tasks?' + params.toString());
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    render(data);
+    errorCount = 0;
+    document.getElementById('error').style.display = 'none';
+  } catch (e) {
+    errorCount++;
+    const el = document.getElementById('error');
+    el.textContent = `Connection error: ${e.message} (attempt ${errorCount})`;
+    el.style.display = 'block';
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

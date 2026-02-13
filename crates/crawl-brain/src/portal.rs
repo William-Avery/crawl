@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::header,
     response::{Html, IntoResponse},
     routing::get,
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tracing::info;
 
@@ -132,6 +132,42 @@ struct EntitySnapshot {
     last_seen: String,
 }
 
+// --- Tasks page types ---
+
+#[derive(Deserialize)]
+struct TaskListParams {
+    status: Option<String>,
+    verb: Option<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct TaskListResponse {
+    tasks: Vec<TaskDetail>,
+    total: u64,
+}
+
+#[derive(Serialize)]
+struct TaskDetail {
+    id: String,
+    verb: String,
+    cell_id: String,
+    description: String,
+    target: String,
+    status: String,
+    created_at: String,
+    completed_at: String,
+    params: String,
+    result: String,
+    duration_ms: Option<i64>,
+    tool_calls_used: Option<i64>,
+    bytes_read: Option<i64>,
+    bytes_written: Option<i64>,
+    network_calls_used: Option<i64>,
+    llm_calls_used: Option<i64>,
+}
+
 /// Serve the portal on the given port with graceful shutdown.
 pub async fn serve(
     brain: Arc<BrainState>,
@@ -145,7 +181,9 @@ pub async fn serve(
 
     let app = Router::new()
         .route("/", get(serve_html))
+        .route("/tasks", get(serve_tasks_html))
         .route("/api/state", get(serve_state))
+        .route("/api/tasks", get(serve_tasks_api))
         .with_state(state);
 
     let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
@@ -165,6 +203,13 @@ async fn serve_html() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         Html(include_str!("portal.html")),
+    )
+}
+
+async fn serve_tasks_html() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        Html(include_str!("portal_tasks.html")),
     )
 }
 
@@ -389,4 +434,102 @@ fn query_entities(brain: &BrainState) -> Vec<EntitySnapshot> {
     })
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
+}
+
+// --- Tasks page API ---
+
+async fn serve_tasks_api(
+    State(state): State<PortalState>,
+    Query(params): Query<TaskListParams>,
+) -> Json<TaskListResponse> {
+    let brain = &state.brain;
+    let limit = params.limit.unwrap_or(100).min(500);
+    let offset = params.offset.unwrap_or(0);
+    let (tasks, total) = query_tasks_filtered(brain, params.status.as_deref(), params.verb.as_deref(), limit, offset);
+    Json(TaskListResponse { tasks, total })
+}
+
+/// Query tasks with optional status/verb filters, joined with telemetry.
+fn query_tasks_filtered(
+    brain: &BrainState,
+    status: Option<&str>,
+    verb: Option<&str>,
+    limit: u64,
+    offset: u64,
+) -> (Vec<TaskDetail>, u64) {
+    let db = brain.storage.db.lock();
+
+    // Build WHERE clause dynamically.
+    let mut conditions = Vec::new();
+    if status.is_some() {
+        conditions.push("t.status = ?");
+    }
+    if verb.is_some() {
+        conditions.push("t.verb = ?");
+    }
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    // Collect filter strings for binding.
+    let filters: Vec<&str> = [status, verb].into_iter().flatten().collect();
+
+    // Count total matching rows.
+    let count_sql = format!("SELECT COUNT(*) FROM tasks t{where_clause}");
+    let total = {
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            filters.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        db.query_row(&count_sql, params.as_slice(), |row| row.get::<_, i64>(0))
+            .unwrap_or(0) as u64
+    };
+
+    // Fetch rows with LEFT JOIN on task_telemetry.
+    let select_sql = format!(
+        "SELECT t.id, t.verb, t.cell_id, t.description, t.target, t.status, \
+         t.created_at, COALESCE(t.completed_at, ''), \
+         COALESCE(t.params, '{{}}'), COALESCE(t.result, ''), \
+         tt.duration_ms, tt.tool_calls_used, tt.bytes_read, tt.bytes_written, \
+         tt.network_calls_used, tt.llm_calls_used \
+         FROM tasks t LEFT JOIN task_telemetry tt ON t.id = tt.task_id\
+         {where_clause} ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
+    );
+
+    let Ok(mut stmt) = db.prepare(&select_sql) else {
+        return (vec![], total);
+    };
+
+    let limit_i = limit as i64;
+    let offset_i = offset as i64;
+    let mut params: Vec<&dyn rusqlite::types::ToSql> =
+        filters.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    params.push(&limit_i);
+    params.push(&offset_i);
+
+    let tasks = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok(TaskDetail {
+                id: row.get(0)?,
+                verb: row.get(1)?,
+                cell_id: row.get(2)?,
+                description: row.get(3)?,
+                target: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+                completed_at: row.get(7)?,
+                params: row.get(8)?,
+                result: row.get(9)?,
+                duration_ms: row.get(10)?,
+                tool_calls_used: row.get(11)?,
+                bytes_read: row.get(12)?,
+                bytes_written: row.get(13)?,
+                network_calls_used: row.get(14)?,
+                llm_calls_used: row.get(15)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default();
+
+    (tasks, total)
 }
