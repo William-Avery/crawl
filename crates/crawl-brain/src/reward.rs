@@ -151,7 +151,7 @@ impl RewardEngine {
 
         // Extract entities from IDENTIFY tasks.
         let entities_found = if verb == Some(TaskVerb::Identify) {
-            self.extract_entities(&task.id, &output).unwrap_or(0)
+            self.extract_entities(&task.id, &task.target, &output).unwrap_or(0)
         } else {
             0
         };
@@ -936,7 +936,7 @@ Respond ONLY with the JSON object."#,
     // ── Entity Extraction ───────────────────────────────────────────
 
     /// Extract entities from an IDENTIFY task output and upsert into the entities table.
-    fn extract_entities(&self, task_id: &str, output: &Value) -> Result<usize> {
+    fn extract_entities(&self, task_id: &str, task_target: &str, output: &Value) -> Result<usize> {
         let mut count = 0usize;
 
         // The task result is wrapped: {"status", "task_id", "verb", "output": {...}}.
@@ -972,11 +972,38 @@ Respond ONLY with the JSON object."#,
                 }
             }
 
-            // Pattern 3: Hypothesis {hypothesis, confidence}
-            if let Some(hypothesis) = obj.get("hypothesis").and_then(|v| v.as_str()) {
+            // Pattern 3: Identifier plugin format {category, target, hypothesis, confidence}
+            // Use structured fields instead of blindly storing hypothesis sentences as names.
+            if obj.contains_key("hypothesis") {
                 let conf = obj.get("confidence").and_then(|v| v.as_f64());
-                if self.upsert_entity("hypothesis", hypothesis, conf, obj)? {
-                    count += 1;
+
+                // Skip low-confidence junk (e.g. "Unable to determine" at 0.0).
+                if conf.unwrap_or(0.0) >= 0.1 {
+                    let hypothesis = obj.get("hypothesis").and_then(|v| v.as_str()).unwrap_or("");
+
+                    // Determine entity kind from category field; fall back to task verb.
+                    let kind = obj
+                        .get("category")
+                        .and_then(|v| v.as_str())
+                        .filter(|c| !c.eq_ignore_ascii_case("unknown") && !c.eq_ignore_ascii_case("cached"))
+                        .unwrap_or("identify");
+
+                    // Use the output's target field, falling back to the task-level target.
+                    let target_str = obj
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(task_target);
+
+                    // Build metadata with hypothesis as description.
+                    let mut meta = obj.clone();
+                    meta.insert("description".to_string(), Value::String(hypothesis.to_string()));
+
+                    // Handle comma-separated targets: create an entity for each sub-target.
+                    for name in target_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                        if self.upsert_entity(kind, name, conf, &meta)? {
+                            count += 1;
+                        }
+                    }
                 }
             }
         }
