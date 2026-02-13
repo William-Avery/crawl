@@ -1,6 +1,6 @@
 [package]
-name = "crawl-plugin-identifier"
-description = "Process/file identifier Cell — uses LLM to classify entities"
+name = "crawl-plugin-identify"
+description = "Identify Cell — uses LLM to classify processes, files, and services"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

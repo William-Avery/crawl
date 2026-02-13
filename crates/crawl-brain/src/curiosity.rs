@@ -837,7 +837,7 @@ Respond ONLY with the JSON array, no other text."#,
     /// Check whether we should auto-submit a training task this cycle.
     fn should_propose_training(&self) -> bool {
         // Trainer cell must be loaded.
-        if !self.brain.engine.is_loaded("trainer") {
+        if !self.brain.engine.is_loaded("build") {
             return false;
         }
 
@@ -851,7 +851,7 @@ Respond ONLY with the JSON array, no other text."#,
         let db = self.brain.storage.db.lock();
         let active: i64 = db
             .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE cell_id = 'trainer' AND status IN ('pending', 'running')",
+                "SELECT COUNT(*) FROM tasks WHERE cell_id = 'build' AND status IN ('pending', 'running')",
                 [],
                 |row| row.get(0),
             )
@@ -876,7 +876,7 @@ Respond ONLY with the JSON array, no other text."#,
                 "training_data_path": data_path,
             }),
             budget: graduated_budget(&TaskVerb::Build),
-            cell_id: "trainer".to_string(),
+            cell_id: "build".to_string(),
             created_at: Utc::now(),
             continuation: None,
         };

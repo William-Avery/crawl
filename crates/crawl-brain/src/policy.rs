@@ -299,7 +299,7 @@ mod tests {
             cell_capabilities: {
                 let mut m = std::collections::HashMap::new();
                 m.insert(
-                    "sysmon".into(),
+                    "monitor".into(),
                     vec![
                         Capability::FilesystemRead,
                         Capability::ProcessList,
@@ -330,7 +330,7 @@ mod tests {
     fn resolve_caps_basic() {
         let policy = test_policy();
         let caps = resolve_capabilities(
-            "sysmon",
+            "monitor",
             &[
                 Capability::FilesystemRead,
                 Capability::ProcessList,
@@ -360,9 +360,9 @@ mod tests {
     #[test]
     fn resolve_caps_denied_by_cell_grant() {
         let policy = test_policy();
-        // sysmon is not granted LlmQuery.
+        // monitor is not granted LlmQuery.
         let caps = resolve_capabilities(
-            "sysmon",
+            "monitor",
             &[Capability::FilesystemRead, Capability::LlmQuery],
             &policy,
         )

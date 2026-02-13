@@ -8,22 +8,16 @@ PolicyConfig(
         peer_sync: false,
     ),
     cell_capabilities: {
-        "sysmon": [
+        "monitor": [
             filesystem_read,
             process_list,
             log_read,
             metrics_read,
             journal_emit,
             inference_run,
-        ],
-        "logwatch": [
-            filesystem_read,
-            log_read,
-            journal_emit,
-            inference_run,
             memory_access,
         ],
-        "identifier": [
+        "identify": [
             filesystem_read,
             process_list,
             log_read,
@@ -32,7 +26,7 @@ PolicyConfig(
             journal_emit,
             cli_exec,
         ],
-        "trainer": [
+        "build": [
             filesystem_read,
             filesystem_write,
             journal_emit,

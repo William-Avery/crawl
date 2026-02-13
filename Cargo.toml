@@ -8,15 +8,14 @@ members = [
 
 exclude = [
     "crates/crawl-plugin-sdk",
-    "crates/crawl-plugin-sysmon",
-    "crates/crawl-plugin-logwatch",
-    "crates/crawl-plugin-identifier",
-    "crates/crawl-plugin-trainer",
+    "crates/crawl-plugin-monitor",
+    "crates/crawl-plugin-identify",
+    "crates/crawl-plugin-build",
 ]
 
 # Plugin crates target wasm32-wasip2 and are built separately via xtask
 # They are NOT workspace members to avoid host-target build conflicts
-# See: crates/crawl-plugin-sdk, crates/crawl-plugin-sysmon, etc.
+# See: crates/crawl-plugin-sdk, crates/crawl-plugin-monitor, etc.
 
 [workspace.package]
 version = "0.1.0"

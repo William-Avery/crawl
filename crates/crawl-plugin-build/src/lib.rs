@@ -1,4 +1,4 @@
-//! Trainer Cell (plugin).
+//! Build Cell (plugin).
 //!
 //! Reads metrics history JSON, computes per-feature statistics and
 //! feature-pair correlations, writes a trained anomaly model JSON file.
@@ -178,7 +178,7 @@ impl plugin_api::Guest for TrainerPlugin {
     fn execute(task: plugin_api::Task) -> plugin_api::TaskResult {
         match run_training(&task) {
             Ok(output) => plugin_api::TaskResult::Completed(output),
-            Err(e) => plugin_api::TaskResult::Failed(format!("trainer error: {e}")),
+            Err(e) => plugin_api::TaskResult::Failed(format!("build error: {e}")),
         }
     }
 
@@ -188,9 +188,9 @@ impl plugin_api::Guest for TrainerPlugin {
 
     fn describe() -> plugin_api::PluginInfo {
         plugin_api::PluginInfo {
-            name: "trainer".to_string(),
+            name: "build".to_string(),
             version: "0.1.0".to_string(),
-            description: "Statistical model trainer — computes anomaly baselines from metrics history"
+            description: "Statistical model builder — computes anomaly baselines from metrics history"
                 .to_string(),
             supported_verbs: vec!["build".to_string()],
         }

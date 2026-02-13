@@ -1,6 +1,6 @@
 [package]
-name = "crawl-plugin-sysmon"
-description = "System monitor Cell — reads /proc metrics and reports system state"
+name = "crawl-plugin-build"
+description = "Build Cell — computes statistical anomaly models from metrics history"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

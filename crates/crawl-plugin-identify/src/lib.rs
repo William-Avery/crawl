@@ -59,7 +59,7 @@ impl plugin_api::Guest for IdentifierPlugin {
 
     fn describe() -> plugin_api::PluginInfo {
         plugin_api::PluginInfo {
-            name: "identifier".to_string(),
+            name: "identify".to_string(),
             version: "0.1.0".to_string(),
             description: "Entity identifier — uses LLM to classify processes, files, and services"
                 .to_string(),

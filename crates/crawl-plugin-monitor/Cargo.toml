@@ -1,6 +1,6 @@
 [package]
-name = "crawl-plugin-trainer"
-description = "Trainer Cell — computes statistical anomaly models from metrics history"
+name = "crawl-plugin-monitor"
+description = "Monitor Cell — reads /proc metrics, scans logs for anomalies"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
