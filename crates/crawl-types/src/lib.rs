@@ -337,6 +337,7 @@ impl Default for PolicyConfig {
                 "free".into(),
                 "ps".into(),
                 "top".into(),
+                "git".into(),
             ],
             allowed_network_domains: vec![],
             blocked_categories: vec![

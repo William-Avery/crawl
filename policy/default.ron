@@ -59,6 +59,7 @@ PolicyConfig(
         "ss",
         "systemctl",
         "journalctl",
+        "git",
     ],
     allowed_network_domains: [
         // Reference / encyclopedic
