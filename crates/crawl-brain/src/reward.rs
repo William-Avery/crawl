@@ -939,7 +939,11 @@ Respond ONLY with the JSON object."#,
     fn extract_entities(&self, task_id: &str, output: &Value) -> Result<usize> {
         let mut count = 0usize;
 
-        if let Some(obj) = output.as_object() {
+        // The task result is wrapped: {"status", "task_id", "verb", "output": {...}}.
+        // The actual entity data lives inside the "output" sub-object.
+        let inner = output.get("output").unwrap_or(output);
+
+        if let Some(obj) = inner.as_object() {
             // Pattern 1: Direct entity {kind, name, confidence}
             if let (Some(kind), Some(name)) = (
                 obj.get("kind").and_then(|v| v.as_str()),
