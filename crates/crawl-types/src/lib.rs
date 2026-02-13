@@ -311,6 +311,11 @@ pub struct PolicyConfig {
     /// Actions the system may perform autonomously.
     #[serde(default)]
     pub allowed_autonomous: Vec<AllowedAutonomousAction>,
+    /// Protected file patterns — these can NEVER be edited or deleted,
+    /// even if they fall within an allowed write path.
+    /// Supports exact paths and glob-like suffix matching (e.g. "*.ron", ".env*").
+    #[serde(default)]
+    pub protected_paths: Vec<String>,
 }
 
 impl Default for PolicyConfig {
@@ -368,6 +373,56 @@ impl Default for PolicyConfig {
                 AllowedAutonomousAction::SystemObservation,
                 AllowedAutonomousAction::WorkspaceWrite,
                 AllowedAutonomousAction::AllowlistedCommands,
+            ],
+            protected_paths: vec![
+                // ── Policy & Security ──
+                "policy/".into(),
+                "*.ron".into(),
+                "*.sig".into(),
+                "*.pub".into(),
+                // ── Secrets & Environment ──
+                ".env".into(),
+                ".env.*".into(),
+                "*.pem".into(),
+                "*.key".into(),
+                "*.crt".into(),
+                "*.p12".into(),
+                "credentials".into(),
+                "secrets".into(),
+                // ── Git & VCS ──
+                ".git/".into(),
+                ".gitignore".into(),
+                ".gitmodules".into(),
+                ".gitattributes".into(),
+                // ── Source code ──
+                "*.rs".into(),
+                "*.toml".into(),
+                "Cargo.lock".into(),
+                "*.proto".into(),
+                "*.wit".into(),
+                // ── Build & CI ──
+                "build.rs".into(),
+                ".github/".into(),
+                ".gitlab-ci.yml".into(),
+                "Makefile".into(),
+                "Dockerfile".into(),
+                "*.dockerfile".into(),
+                // ── Network & System Config ──
+                "/etc/".into(),
+                "/sys/".into(),
+                "*.conf".into(),
+                "*.cfg".into(),
+                "*.ini".into(),
+                "*.yaml".into(),
+                "*.yml".into(),
+                // ── Documentation that governs behavior ──
+                "CLAUDE.md".into(),
+                "SECURITY.md".into(),
+                // ── Shell scripts ──
+                "*.sh".into(),
+                "*.bash".into(),
+                // ── WASM plugins (compiled) ──
+                "*.wasm".into(),
             ],
         }
     }

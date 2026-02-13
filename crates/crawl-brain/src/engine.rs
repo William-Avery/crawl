@@ -235,6 +235,12 @@ impl crawl::plugin::host_tools::Host for CellState {
         if !crate::policy::is_command_allowed(&cmd, &self.subsystems.policy) {
             return Ok(Err(format!("command not in allowlist: {cmd}")));
         }
+        // Check that no argument references a protected file path.
+        for arg in &args {
+            if crate::policy::is_path_protected(arg, &self.subsystems.policy) {
+                return Ok(Err(format!("argument references protected path: {arg}")));
+            }
+        }
         match std::process::Command::new(&cmd).args(&args).output() {
             Ok(output) => Ok(Ok(crawl::plugin::host_tools::CommandOutput {
                 exit_code: output.status.code().unwrap_or(-1),

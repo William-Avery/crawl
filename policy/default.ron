@@ -245,6 +245,68 @@ PolicyConfig(
         "spyic.com", "minspy.com", "spyzie.com", "hovwatch.com",
         "thetruthspy.com", "eyezy.com", "webwatcher.com",
     ],
+    // ── Protected Paths ────────────────────────────────────────
+    // These files can NEVER be edited or deleted by any Cell or
+    // autonomous action, even if they fall within allowed_write_paths.
+    // This is the last line of defense against self-modification.
+    protected_paths: [
+        // Policy & security files — the rules that govern the system
+        "policy/",
+        "*.ron",
+        "*.sig",
+        "*.pub",
+
+        // Secrets & environment variables
+        ".env",
+        ".env.*",
+        "*.pem",
+        "*.key",
+        "*.crt",
+        "*.p12",
+        "credentials",
+        "secrets",
+
+        // Git & version control — prevents history rewriting
+        ".git/",
+        ".gitignore",
+        ".gitmodules",
+        ".gitattributes",
+
+        // Source code — the system cannot modify its own code
+        "*.rs",
+        "*.toml",
+        "Cargo.lock",
+        "*.proto",
+        "*.wit",
+
+        // Build & CI configuration
+        "build.rs",
+        ".github/",
+        ".gitlab-ci.yml",
+        "Makefile",
+        "Dockerfile",
+        "*.dockerfile",
+
+        // Network & system configuration
+        "/etc/",
+        "/sys/",
+        "*.conf",
+        "*.cfg",
+        "*.ini",
+        "*.yaml",
+        "*.yml",
+
+        // Documentation that governs behavior
+        "CLAUDE.md",
+        "SECURITY.md",
+
+        // Shell scripts — prevent injecting executable code
+        "*.sh",
+        "*.bash",
+
+        // Compiled WASM plugins — prevent binary replacement
+        "*.wasm",
+    ],
     // ── Absolute Prohibitions ─────────────────────────────────
     // These actions can NEVER be performed. No override. No escalation.
     // No capability exists for these actions in the system.

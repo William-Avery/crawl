@@ -120,12 +120,102 @@ pub fn is_path_readable(path: &str, policy: &PolicyConfig) -> bool {
         .any(|allowed| path.starts_with(allowed))
 }
 
-/// Check whether a given path is within the allowed write paths.
+/// Check whether a given path is within the allowed write paths
+/// AND not in the protected files list.
 pub fn is_path_writable(path: &str, policy: &PolicyConfig) -> bool {
+    // Protected paths override everything — checked first.
+    if is_path_protected(path, policy) {
+        return false;
+    }
     policy
         .allowed_write_paths
         .iter()
         .any(|allowed| path.starts_with(allowed))
+}
+
+/// Check whether a path matches any protected file pattern.
+/// Protected files can NEVER be written to, even if they are
+/// within an allowed write path. This is the last line of defense
+/// against self-modification of critical system files.
+///
+/// Pattern matching:
+/// - Exact prefix: "policy/" matches "policy/default.ron"
+/// - Suffix glob: "*.ron" matches "policy/default.ron"
+/// - Filename match: ".env" matches "/path/to/.env" and ".env.local"
+/// - Directory prefix: "/etc/" matches "/etc/hostname"
+pub fn is_path_protected(path: &str, policy: &PolicyConfig) -> bool {
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .map(|f| f.to_string_lossy())
+        .unwrap_or_default()
+        .to_string();
+
+    for pattern in &policy.protected_paths {
+        // Suffix glob: "*.ext" matches files ending with ".ext"
+        if let Some(suffix) = pattern.strip_prefix('*') {
+            if path.ends_with(suffix) || filename.ends_with(suffix) {
+                tracing::warn!(
+                    path,
+                    pattern,
+                    "write blocked: path matches protected pattern"
+                );
+                return true;
+            }
+            continue;
+        }
+
+        // Directory prefix: "policy/" or "/etc/" matches paths containing it
+        if pattern.ends_with('/') {
+            if path.starts_with(pattern)
+                || path.contains(&format!("/{pattern}"))
+                || path.contains(pattern)
+            {
+                tracing::warn!(
+                    path,
+                    pattern,
+                    "write blocked: path is within protected directory"
+                );
+                return true;
+            }
+            continue;
+        }
+
+        // Dot-prefix pattern with wildcard: ".env.*" matches ".env.local", ".env.prod"
+        if pattern.ends_with(".*") {
+            let base = pattern.strip_suffix(".*").unwrap();
+            if filename.starts_with(base) {
+                tracing::warn!(
+                    path,
+                    pattern,
+                    "write blocked: filename matches protected pattern"
+                );
+                return true;
+            }
+            continue;
+        }
+
+        // Exact filename match: ".gitignore" matches "/any/path/.gitignore"
+        if filename == *pattern {
+            tracing::warn!(
+                path,
+                pattern,
+                "write blocked: exact filename match with protected file"
+            );
+            return true;
+        }
+
+        // Exact path prefix match: "Cargo.lock" matches "Cargo.lock"
+        if path == *pattern || path.ends_with(&format!("/{pattern}")) {
+            tracing::warn!(
+                path,
+                pattern,
+                "write blocked: path matches protected file"
+            );
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Check whether a CLI command is in the allowlist.
@@ -359,5 +449,84 @@ mod tests {
             &policy,
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn protected_paths_blocks_policy_files() {
+        let policy = test_policy();
+        assert!(is_path_protected("policy/default.ron", &policy));
+        assert!(is_path_protected("/mnt/ssd/project/crawl/policy/custom.ron", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_env_files() {
+        let policy = test_policy();
+        assert!(is_path_protected(".env", &policy));
+        assert!(is_path_protected("/project/.env", &policy));
+        assert!(is_path_protected(".env.local", &policy));
+        assert!(is_path_protected(".env.production", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_source_code() {
+        let policy = test_policy();
+        assert!(is_path_protected("src/main.rs", &policy));
+        assert!(is_path_protected("Cargo.toml", &policy));
+        assert!(is_path_protected("Cargo.lock", &policy));
+        assert!(is_path_protected("proto/crawl.proto", &policy));
+        assert!(is_path_protected("wit/world.wit", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_git() {
+        let policy = test_policy();
+        assert!(is_path_protected(".git/config", &policy));
+        assert!(is_path_protected(".gitignore", &policy));
+        assert!(is_path_protected(".gitmodules", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_secrets() {
+        let policy = test_policy();
+        assert!(is_path_protected("server.pem", &policy));
+        assert!(is_path_protected("private.key", &policy));
+        assert!(is_path_protected("cert.crt", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_config() {
+        let policy = test_policy();
+        assert!(is_path_protected("/etc/hostname", &policy));
+        assert!(is_path_protected("nginx.conf", &policy));
+        assert!(is_path_protected("docker-compose.yaml", &policy));
+        assert!(is_path_protected("config.yml", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_scripts_and_wasm() {
+        let policy = test_policy();
+        assert!(is_path_protected("deploy.sh", &policy));
+        assert!(is_path_protected("setup.bash", &policy));
+        assert!(is_path_protected("plugins/sysmon.wasm", &policy));
+    }
+
+    #[test]
+    fn protected_paths_allows_workspace_data() {
+        let policy = test_policy();
+        // Plain data files in workspace should NOT be protected.
+        assert!(!is_path_protected("workspace/output.json", &policy));
+        assert!(!is_path_protected("workspace/metrics.csv", &policy));
+        assert!(!is_path_protected("workspace/report.txt", &policy));
+        assert!(!is_path_protected("/tmp/crawl/data.bin", &policy));
+    }
+
+    #[test]
+    fn protected_paths_blocks_writable_path() {
+        let policy = test_policy();
+        // Even though /tmp/crawl is in allowed_write_paths,
+        // a .rs file there should still be protected.
+        assert!(is_path_writable("/tmp/crawl/data.bin", &policy));
+        assert!(!is_path_writable("/tmp/crawl/exploit.rs", &policy));
+        assert!(!is_path_writable("/tmp/crawl/evil.sh", &policy));
     }
 }
