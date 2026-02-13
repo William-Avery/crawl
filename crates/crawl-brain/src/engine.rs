@@ -464,6 +464,12 @@ impl PluginEngine {
         wasm_config.epoch_interruption(true);
         wasm_config.cranelift_opt_level(wasmtime::OptLevel::Speed);
 
+        // Enable compilation cache — compiled WASM is cached to disk so
+        // subsequent loads skip Cranelift compilation entirely.
+        if let Err(e) = wasm_config.cache_config_load_default() {
+            tracing::warn!(error = %e, "failed to enable wasmtime compilation cache, continuing without");
+        }
+
         let engine = Engine::new(&wasm_config).with_context(|| "failed to create wasmtime engine")?;
 
         Ok(Self {

@@ -29,7 +29,7 @@ rust-version = "1.93"
 tokio = { version = "1.47", features = ["full"] }
 
 # WASM runtime
-wasmtime = { version = "30", features = ["component-model", "async", "cranelift"] }
+wasmtime = { version = "30", features = ["component-model", "async", "cranelift", "cache"] }
 wasmtime-wasi = { version = "30" }
 
 # Serialization
