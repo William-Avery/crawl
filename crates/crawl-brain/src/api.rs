@@ -452,6 +452,26 @@ impl BrainService for BrainServiceImpl {
             }
         }
 
+        // 8. Version history (git log).
+        {
+            match std::process::Command::new("git")
+                .args(["log", "--oneline", "-10"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    let log = String::from_utf8_lossy(&output.stdout);
+                    if !log.is_empty() {
+                        sources_used.push("git".to_string());
+                        context_sections.push(format!(
+                            "## Version History (recent commits)\n{}",
+                            log.trim()
+                        ));
+                    }
+                }
+                _ => {} // git not available or not in a repo — skip silently
+            }
+        }
+
         // Build the LLM prompt.
         let context_block = context_sections.join("\n\n");
 

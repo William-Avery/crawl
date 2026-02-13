@@ -429,7 +429,7 @@ async fn run_chat_repl(
 ) -> Result<()> {
     use std::io::{BufRead, Write};
 
-    println!("crawl-brain chat (/quit, /clear, /status, /file, /ingest, /search)\n");
+    println!("crawl-brain chat (/quit, /clear, /status, /file, /ingest, /search, /exec)\n");
 
     let stdin = std::io::stdin();
     let mut history: Vec<api::pb::ChatMessage> = Vec::new();
@@ -603,6 +603,51 @@ async fn run_chat_repl(
                     Err(e) => {
                         println!("search failed: {e}\n");
                     }
+                }
+                continue;
+            }
+            _ if input.starts_with("/exec ") => {
+                let raw = input.strip_prefix("/exec ").unwrap().trim();
+                let mut parts = raw.split_whitespace();
+                let cmd = match parts.next() {
+                    Some(c) => c.to_string(),
+                    None => { println!("usage: /exec <command> [args...]\n"); continue; }
+                };
+                let args: Vec<String> = parts.map(|s| s.to_string()).collect();
+
+                // Validate against the policy allowlist client-side for fast feedback.
+                let allowed = ["uname","df","free","ps","top","lsblk","ip","ss",
+                               "systemctl","journalctl","git"];
+                if !allowed.contains(&cmd.as_str()) {
+                    println!("command not in allowlist: {cmd}\n");
+                    continue;
+                }
+
+                println!("exec: {cmd} {}", args.join(" "));
+                match std::process::Command::new(&cmd).args(&args).output() {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let truncated = if stdout.len() > 4000 {
+                            format!("{}...\n(truncated, showing first 4000 of {} bytes)",
+                                &stdout[..4000], stdout.len())
+                        } else {
+                            stdout.to_string()
+                        };
+                        if !truncated.is_empty() {
+                            println!("{truncated}");
+                        }
+                        if !stderr.is_empty() {
+                            println!("stderr: {stderr}");
+                        }
+                        // Inject into history so brain sees the output.
+                        history.push(api::pb::ChatMessage {
+                            role: "user".into(),
+                            content: format!("I ran `{cmd} {}` and got:\n```\n{truncated}\n```",
+                                args.join(" ")),
+                        });
+                    }
+                    Err(e) => println!("exec error: {e}\n"),
                 }
                 continue;
             }

@@ -30,6 +30,7 @@ PolicyConfig(
             llm_query,
             memory_access,
             journal_emit,
+            cli_exec,
         ],
         "trainer": [
             filesystem_read,
