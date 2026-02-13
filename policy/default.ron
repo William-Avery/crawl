@@ -75,6 +75,7 @@ PolicyConfig(
         "workspace",
     ],
     allowed_cli_commands: [
+        // Original commands
         "ls",
         "uname",
         "df",
@@ -87,6 +88,31 @@ PolicyConfig(
         "systemctl",
         "journalctl",
         "git",
+        // File inspection (read-only)
+        "cat",
+        "head",
+        "tail",
+        "find",
+        "grep",
+        "wc",
+        "du",
+        "stat",
+        "file",
+        "readlink",
+        // System inspection (read-only)
+        "dmesg",
+        "nvidia-smi",
+        "lscpu",
+        "nproc",
+        "uptime",
+        "who",
+        "last",
+        "hostname",
+        "date",
+        "mount",
+        "lsof",
+        "sensors",
+        "dmidecode",
     ],
     allowed_network_domains: [
         // Reference / encyclopedic

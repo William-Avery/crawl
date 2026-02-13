@@ -151,10 +151,10 @@ impl ResearchEngine {
                     }
                 }
                 Ok(_) => {
-                    tracing::debug!(query, "web search returned no results");
+                    tracing::warn!(query, "web search returned no results");
                 }
                 Err(e) => {
-                    tracing::debug!(error = %e, query, "web search failed");
+                    tracing::warn!(error = %e, query, "web search failed");
                 }
             }
         }
@@ -235,16 +235,10 @@ impl ResearchEngine {
     async fn web_search(&self, query: &str, max_results: usize) -> Result<Vec<WebSnippet>> {
         const MAX_RESPONSE_BYTES: usize = 512_000; // 512KB max per response.
 
-        // Build a domain-scoped query: "query site:domain1 OR site:domain2"
-        let site_filter: String = self.allowed_domains.iter()
-            .map(|d| format!("site:{d}"))
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        let scoped_query = if site_filter.is_empty() {
-            query.to_string()
-        } else {
-            format!("{query} {site_filter}")
-        };
+        // Search with raw query — the post-filter on allowed_domains below
+        // is the correct enforcement point.  Appending 33 site: operators to the
+        // DuckDuckGo query produced garbage results.
+        let scoped_query = query.to_string();
 
         let url = format!(
             "https://html.duckduckgo.com/html/?q={}",

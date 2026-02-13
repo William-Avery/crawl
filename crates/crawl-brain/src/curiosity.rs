@@ -403,6 +403,69 @@ impl CuriosityLoop {
         // Telemetry cost summary from task_telemetry table.
         let telemetry_summary = self.build_telemetry_summary().unwrap_or_default();
 
+        // Novelty staleness: seconds since the last new entity was discovered.
+        let hours_since_novel = {
+            let db = self.brain.storage.db.lock();
+            db.query_row(
+                "SELECT CAST((julianday('now') - julianday(MAX(first_seen))) * 86400 AS INTEGER) FROM entities",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(99999) as f64
+                / 3600.0
+        };
+
+        // Verb diversity: check if one verb dominates the last 20 completed tasks.
+        let verb_diversity_warning = {
+            let db = self.brain.storage.db.lock();
+            let mut stmt = db
+                .prepare(
+                    "SELECT verb, COUNT(*) as cnt FROM tasks \
+                     WHERE status IN ('completed','failed') \
+                     ORDER BY created_at DESC LIMIT 20",
+                )
+                .ok();
+            let mut counts: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
+            let mut total: u64 = 0;
+            if let Some(ref mut s) = stmt {
+                let _ = s.query_map([], |row| {
+                    let verb: String = row.get(0)?;
+                    let cnt: i64 = row.get(1)?;
+                    Ok((verb, cnt as u64))
+                }).map(|rows| {
+                    for r in rows.flatten() {
+                        *counts.entry(r.0).or_default() += r.1;
+                        total += r.1;
+                    }
+                });
+            }
+            if total > 0 {
+                if let Some((verb, cnt)) = counts.iter().max_by_key(|(_, c)| *c) {
+                    let pct = (*cnt as f64 / total as f64) * 100.0;
+                    if pct > 60.0 {
+                        let others: Vec<&str> = ["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "TRAIN", "RESEARCH"]
+                            .iter()
+                            .filter(|v| !v.eq_ignore_ascii_case(verb))
+                            .copied()
+                            .collect();
+                        format!(
+                            "WARNING: {:.0}% of your recent tasks are {}. Diversify — try {} instead.",
+                            pct,
+                            verb.trim_matches('"'),
+                            others.join(", "),
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        };
+
         Ok(ObservationContext {
             cpu_load_1m: metrics.cpu_load_1m,
             cpu_load_5m: metrics.cpu_load_5m,
@@ -427,6 +490,8 @@ impl CuriosityLoop {
             wisdom_summary,
             maturity_level,
             telemetry_summary,
+            hours_since_novel,
+            verb_diversity_warning,
         })
     }
 
@@ -522,6 +587,26 @@ impl CuriosityLoop {
             format!("\n{}\nUse this to estimate which tasks are cheap vs expensive.\n", ctx.telemetry_summary)
         };
 
+        // Knowledge hunger message based on staleness.
+        let hunger_message = if ctx.hours_since_novel < 1.0 {
+            "Good pace — keep exploring."
+        } else if ctx.hours_since_novel < 4.0 {
+            "You're getting stale. Prioritize investigating something completely new."
+        } else {
+            "URGENT: You are stagnating. Your top priority is discovering something novel. \
+             Try RESEARCH on unfamiliar topics, or IDENTIFY targets you've never examined."
+        };
+        let hunger_section = format!(
+            "\n## Knowledge Hunger\nIt has been {:.1} hours since you discovered a genuinely new entity.\n{}\n",
+            ctx.hours_since_novel, hunger_message,
+        );
+
+        let diversity_section = if ctx.verb_diversity_warning.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}\n", ctx.verb_diversity_warning)
+        };
+
         format!(
 r#"You are the reasoning core of a local system observer called "crawl-brain".
 You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this machine — understand what's running, what's normal, what's unusual, and learn about the system over time.
@@ -558,6 +643,22 @@ Consider:
 - What knowledge gaps exist that could be filled?
 - Respect learned wisdom — avoid repeating mistakes listed in constraints.
 
+## Exploration Priorities
+- DIVERSITY: Vary your verbs and targets. If recent tasks are all MONITOR, try IDENTIFY or RESEARCH instead.
+- WORLD KNOWLEDGE: Use RESEARCH to learn about unfamiliar services, technologies, or patterns you encounter.
+  Don't just observe the system — understand WHY things are the way they are.
+- SELF-KNOWLEDGE: Use different CLI tools (cat, dmesg, nvidia-smi, lscpu, find) to explore parts of
+  the system you haven't examined yet.
+- DEPTH: When you discover something interesting, follow up with deeper investigation.
+  An IDENTIFY finding should lead to RESEARCH about what you found.
+{hunger}{diversity}
+## Unexplored Areas (suggestions)
+- Hardware: GPU state (nvidia-smi), thermal sensors, disk health, USB devices
+- Network: listening services, active connections, DNS config, VPN status
+- System: kernel modules, boot logs (dmesg), cron jobs, systemd timers
+- Software: installed packages, running daemons you haven't identified
+- World: research technologies/services you've encountered but don't understand
+
 Respond with a JSON array of 1-3 tasks to submit. You should almost always submit at least one task — there is always something to learn about this system. Only return an empty array [] if you have thoroughly investigated everything recently.
 
 Format: [{{"cell_id": "...", "verb": "...", "description": "...", "target": "...", "hypothesis": "..."}}]
@@ -585,6 +686,8 @@ Respond ONLY with the JSON array, no other text."#,
             reflection = reflection_section,
             telemetry = telemetry_section,
             verbs = allowed_verbs_str,
+            hunger = hunger_section,
+            diversity = diversity_section,
         )
     }
 
@@ -1048,4 +1151,8 @@ struct ObservationContext {
     wisdom_summary: String,
     maturity_level: String,
     telemetry_summary: String,
+    /// Hours since the last novel entity was discovered.
+    hours_since_novel: f64,
+    /// Warning string if one verb dominates recent tasks (>60%).
+    verb_diversity_warning: String,
 }

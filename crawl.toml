@@ -61,7 +61,7 @@ think_interval_ms = 15000
 max_pending_tasks = 12
 max_tokens_per_think = 384
 temperature = 0.7
-allowed_verbs = ["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "BUILD"]
+allowed_verbs = ["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "TRAIN", "RESEARCH"]
 
 [autonomy.reward]
 enabled = true
