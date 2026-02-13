@@ -90,6 +90,7 @@ impl RewardEngine {
         config: RewardConfig,
         soul: Soul,
         wisdom: Option<Arc<WisdomSystem>>,
+        persisted_ewma: Option<f64>,
     ) -> Self {
         Self {
             db,
@@ -97,7 +98,7 @@ impl RewardEngine {
             journal,
             memory,
             config,
-            ewma_composite: 0.5, // avoid cold-start stall
+            ewma_composite: persisted_ewma.unwrap_or(0.5), // restore or cold-start default
             cycle_count: 0,
             soul,
             wisdom,

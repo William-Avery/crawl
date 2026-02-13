@@ -48,6 +48,12 @@ impl CuriosityLoop {
         soul: Soul,
         wisdom: Option<Arc<WisdomSystem>>,
     ) -> Self {
+        let persisted_ewma = brain
+            .storage
+            .kv_get("reward_ewma")
+            .ok()
+            .flatten()
+            .and_then(|bytes| bytes.try_into().ok().map(f64::from_le_bytes));
         let reward_engine = RewardEngine::new(
             brain.storage.db.clone(),
             brain.llm.clone(),
@@ -56,6 +62,7 @@ impl CuriosityLoop {
             brain.config.autonomy.reward.clone(),
             soul,
             wisdom.clone(),
+            persisted_ewma,
         );
         Self {
             brain,
