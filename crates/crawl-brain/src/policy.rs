@@ -72,7 +72,7 @@ pub fn resolve_capabilities(
 
     if !denied.is_empty() {
         for (cap, reason) in &denied {
-            tracing::warn!(
+            tracing::debug!(
                 cell_id,
                 capability = ?cap,
                 reason,
