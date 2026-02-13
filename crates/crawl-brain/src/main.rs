@@ -99,6 +99,11 @@ fn main() -> Result<()> {
         "crawl-brain starting"
     );
 
+    // Stop any previous instance before we try to acquire the database lock.
+    let pid_path = config.storage.redb_path.with_extension("pid");
+    stop_previous_instance(&pid_path);
+    write_pid_file(&pid_path);
+
     // Install panic hook that uses tracing (tokio::spawn panics go to stderr by default).
     std::panic::set_hook(Box::new(|info| {
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
@@ -118,7 +123,9 @@ fn main() -> Result<()> {
         .thread_name("crawl-brain")
         .build()?;
 
-    runtime.block_on(async_main(config))
+    let result = runtime.block_on(async_main(config));
+    let _ = std::fs::remove_file(&pid_path);
+    result
 }
 
 async fn async_main(config: config::BrainConfig) -> Result<()> {
@@ -757,6 +764,54 @@ async fn run_chat_repl(
 
     println!("goodbye ({exchanges} exchanges, {total_tokens} tokens)");
     Ok(())
+}
+
+// ── PID file management ─────────────────────────────────────────────
+
+/// If a PID file exists and the process is still alive, send SIGTERM and wait.
+fn stop_previous_instance(pid_path: &std::path::Path) {
+    let content = match std::fs::read_to_string(pid_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let old_pid: &str = content.trim();
+    if old_pid.is_empty() || old_pid.parse::<u32>().is_err() {
+        let _ = std::fs::remove_file(pid_path);
+        return;
+    }
+
+    // Check if the process is alive via /proc.
+    if !std::path::Path::new(&format!("/proc/{old_pid}")).exists() {
+        let _ = std::fs::remove_file(pid_path);
+        return;
+    }
+
+    eprintln!("stopping previous crawl-brain (pid {old_pid})...");
+    let _ = std::process::Command::new("kill").arg(old_pid).status();
+
+    // Wait up to 5 seconds for graceful shutdown.
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if !std::path::Path::new(&format!("/proc/{old_pid}")).exists() {
+            let _ = std::fs::remove_file(pid_path);
+            eprintln!("previous instance stopped");
+            return;
+        }
+    }
+
+    // Force kill if still alive.
+    eprintln!("force-killing previous crawl-brain (pid {old_pid})");
+    let _ = std::process::Command::new("kill").args(["-9", old_pid]).status();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let _ = std::fs::remove_file(pid_path);
+}
+
+fn write_pid_file(pid_path: &std::path::Path) {
+    let pid = std::process::id();
+    if let Some(parent) = pid_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(pid_path, pid.to_string());
 }
 
 /// Extract text from a file. Supports PDF (via pdftotext) and plain text.
