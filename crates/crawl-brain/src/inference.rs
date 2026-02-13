@@ -35,6 +35,7 @@ pub struct InjectionScore {
 
 /// Per-feature statistical model (loaded from trainer output).
 #[derive(Debug, Clone, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct FeatureStats {
     pub name: String,
     pub mean: f64,
@@ -56,6 +57,7 @@ pub struct FeatureStats {
 
 /// Trained anomaly detection model (loaded from JSON produced by trainer cell).
 #[derive(Debug, Clone, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct TrainedAnomalyModel {
     pub features: Vec<FeatureStats>,
     pub correlations: Vec<(String, String, f64)>,
