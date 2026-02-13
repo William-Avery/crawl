@@ -8,3 +8,5 @@ crawl.toml
 *.swo
 *~
 .DS_Store
+# Plugin crates are not workspace members; their lock files are regenerated on build
+crates/crawl-plugin-*/Cargo.lock
