@@ -62,14 +62,21 @@ enum Command {
     },
     /// Show comprehensive brain status.
     Status,
+    /// Initialize the database scaffold (creates tables if they don't exist).
+    Init,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Client subcommands: connect to running daemon, no need for full config/tracing.
+    // Handle subcommands.
     if let Some(cmd) = cli.command {
-        return run_client_command(cmd, &cli.config);
+        return match cmd {
+            // Init is local-only — no running daemon needed.
+            Command::Init => init_storage(&cli.config),
+            // Client subcommands: connect to running daemon.
+            other => run_client_command(other, &cli.config),
+        };
     }
 
     // Load config first (before async runtime) for tracing setup.
@@ -377,6 +384,41 @@ pub struct BrainState {
     pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
+// ── Init subcommand ─────────────────────────────────────────────────
+
+fn init_storage(config_path: &std::path::Path) -> Result<()> {
+    let config = config::BrainConfig::load_or_default(config_path)?;
+
+    // Check if databases already exist before initializing.
+    let sqlite_exists = config.storage.sqlite_path.exists();
+    let redb_exists = config.storage.redb_path.exists();
+
+    let storage = storage::Storage::init(&config.storage)?;
+
+    if sqlite_exists && redb_exists {
+        println!("storage already initialized (no changes needed)");
+    } else {
+        println!("storage initialized:");
+    }
+    println!("  sqlite: {}", config.storage.sqlite_path.display());
+    println!("  redb:   {}", config.storage.redb_path.display());
+
+    // Report table count from SQLite as a sanity check.
+    let db = storage.db.lock();
+    let table_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        [],
+        |row| row.get(0),
+    )?;
+    println!("  tables: {table_count}");
+
+    // Also ensure journal directory exists.
+    std::fs::create_dir_all(&config.storage.journal_dir)?;
+    println!("  journal: {}", config.storage.journal_dir.display());
+
+    Ok(())
+}
+
 // ── Client subcommands ──────────────────────────────────────────────
 
 fn run_client_command(cmd: Command, config_path: &std::path::Path) -> Result<()> {
@@ -445,6 +487,7 @@ fn run_client_command(cmd: Command, config_path: &std::path::Path) -> Result<()>
                     println!("  Soul:       {}", s.soul_summary);
                 }
             }
+            Command::Init => unreachable!("handled before run_client_command"),
         }
 
         Ok(())
