@@ -781,12 +781,12 @@ async fn run_chat_repl(
 
                 match execute_tool_command(command, &allowed_cli_commands) {
                     Ok(output) => {
-                        // Show a preview (first 3 lines).
-                        for line in output.lines().take(3) {
+                        // Show a preview (first 6 lines).
+                        for line in output.lines().take(6) {
                             println!("  [tool] {line}");
                         }
                         let line_count = output.lines().count();
-                        if line_count > 3 {
+                        if line_count > 6 {
                             println!("  [tool] ... ({line_count} lines total)");
                         }
 

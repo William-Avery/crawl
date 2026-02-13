@@ -510,7 +510,10 @@ impl BrainService for BrainServiceImpl {
                 - When using a tool: write a SHORT reasoning sentence, then the <tool_exec> tag, then STOP. \
                 Do NOT include your final answer in the same response as a tool call.\n\
                 - After you receive tool output, give your final answer using that data.\n\
-                - Only skip tools for questions that don't need live system data (general knowledge, conversation, etc.).\n"
+                - Only skip tools for questions that don't need live system data (general knowledge, conversation, etc.).\n\
+                - NEVER use shell syntax like pipes (|), redirects (>), subshells ($(...)), or glob wildcards. \
+                Commands are executed directly, NOT through a shell. Use command flags instead \
+                (e.g. `ps -eo pid,pcpu,pmem,comm --sort=-pcpu` instead of `ps aux | sort | head`).\n"
             )
         };
 
