@@ -773,6 +773,12 @@ async fn run_chat_repl(
                     break;
                 }
 
+                // Warn if the LLM emitted multiple tool tags (we only run the first).
+                let extra_tags = resp.answer.matches("<tool_exec>").count();
+                if extra_tags > 1 {
+                    println!("  [tool] warning: {} tool tags found, running only the first", extra_tags);
+                }
+
                 // Print the reasoning text if any.
                 if !reasoning.is_empty() {
                     println!("\nbrain> {reasoning}");
