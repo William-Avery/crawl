@@ -49,11 +49,16 @@ fn main() -> Result<()> {
         .log_level
         .as_deref()
         .unwrap_or(&config.daemon.log_level);
+    // Build log filter: use RUST_LOG if set, otherwise use config level.
+    // Always suppress noisy dependency internals (cranelift compiler, HTTP client).
+    let base_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| log_level.to_string());
+    let filter = format!(
+        "{base_filter},\
+         cranelift_codegen=warn,wasmtime_cranelift=warn,wasmtime::runtime=warn,regalloc2=warn,\
+         hyper_util=warn,hyper=warn,reqwest=warn"
+    );
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_level)),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::new(&filter))
         .with_target(true)
         .with_thread_ids(true)
         .init();
