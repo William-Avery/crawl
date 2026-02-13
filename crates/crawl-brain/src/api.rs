@@ -494,26 +494,54 @@ impl BrainService for BrainServiceImpl {
         // Build the available-tools section from policy allowlist.
         let allowed_cmds = self.brain.policy.load();
         let tools_section = if allowed_cmds.allowed_cli_commands.is_empty() {
-            String::new()
+            // Even without CLI commands, offer the search tool.
+            "\n## Available Tools\n\
+            You have one tool — web research for things you don't know:\n\n\
+            <tool_search>your search query</tool_search>\n\n\
+            Use this when you encounter unfamiliar terms, technologies, error messages, \
+            or need external knowledge not in your local context.\n\n\
+            RULES:\n\
+            - Output at most ONE tool tag per response.\n\
+            - When using a tool: write a SHORT reasoning sentence, then the tag, then STOP. \
+            Do NOT include your final answer in the same response as a tool call.\n\
+            - After you receive tool output, give your final answer using that data.\n\
+            - Use <tool_search> proactively when you don't recognize something — \
+            don't ask the user to explain things you could research yourself.\n\n\
+            ## Conversational Style\n\
+            - Be proactively curious. After answering, ask a follow-up question if \
+            the topic warrants deeper exploration.\n\
+            - If the user mentions something you're unfamiliar with, research it \
+            before responding rather than asking them to explain.\n".to_string()
         } else {
             let cmd_list = allowed_cmds.allowed_cli_commands.join(", ");
             format!(
                 "\n## Available Tools\n\
-                You have the ability to execute CLI commands to gather live system data.\n\
-                To run a command, output exactly one XML tag:\n\n\
-                <tool_exec>command args...</tool_exec>\n\n\
+                You have two tools:\n\n\
+                1. CLI commands for live system data:\n\
+                <tool_exec>command args...</tool_exec>\n\
                 Allowed commands: {cmd_list}\n\n\
-                IMPORTANT RULES:\n\
+                2. Web research for things you don't know:\n\
+                <tool_search>your search query</tool_search>\n\
+                Use this when you encounter unfamiliar terms, technologies, error messages, \
+                or need external knowledge not in your local context.\n\n\
+                RULES:\n\
                 - When the user asks about current system state (memory, disk, processes, network, etc.), \
-                USE a tool to get live data rather than relying on stale context metrics.\n\
-                - Output at most ONE <tool_exec> tag per response.\n\
-                - When using a tool: write a SHORT reasoning sentence, then the <tool_exec> tag, then STOP. \
+                USE <tool_exec> to get live data rather than relying on stale context metrics.\n\
+                - Output at most ONE tool tag per response (either <tool_exec> or <tool_search>, not both).\n\
+                - When using a tool: write a SHORT reasoning sentence, then the tag, then STOP. \
                 Do NOT include your final answer in the same response as a tool call.\n\
                 - After you receive tool output, give your final answer using that data.\n\
-                - Only skip tools for questions that don't need live system data (general knowledge, conversation, etc.).\n\
+                - Only skip tools for questions that don't need live system data or external knowledge.\n\
                 - NEVER use shell syntax like pipes (|), redirects (>), subshells ($(...)), or glob wildcards. \
                 Commands are executed directly, NOT through a shell. Use command flags instead \
-                (e.g. `ps -eo pid,pcpu,pmem,comm --sort=-pcpu` instead of `ps aux | sort | head`).\n"
+                (e.g. `ps -eo pid,pcpu,pmem,comm --sort=-pcpu` instead of `ps aux | sort | head`).\n\
+                - Use <tool_search> proactively when you don't recognize something — \
+                don't ask the user to explain things you could research yourself.\n\n\
+                ## Conversational Style\n\
+                - Be proactively curious. After answering, ask a follow-up question if \
+                the topic warrants deeper exploration.\n\
+                - If the user mentions something you're unfamiliar with, research it \
+                before responding rather than asking them to explain.\n"
             )
         };
 
