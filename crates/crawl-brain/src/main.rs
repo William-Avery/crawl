@@ -451,6 +451,63 @@ fn run_client_command(cmd: Command, config_path: &std::path::Path) -> Result<()>
     })
 }
 
+/// Parse a `<tool_exec>command args</tool_exec>` tag from an LLM response.
+/// Returns `(pre_text, command)` where pre_text is any reasoning before the tag.
+fn parse_tool_request(response: &str) -> Option<(&str, &str)> {
+    let start_tag = "<tool_exec>";
+    let end_tag = "</tool_exec>";
+    let start = response.find(start_tag)?;
+    let cmd_start = start + start_tag.len();
+    let cmd_end = response[cmd_start..].find(end_tag)?;
+    let pre_text = response[..start].trim();
+    let command = response[cmd_start..cmd_start + cmd_end].trim();
+    if command.is_empty() {
+        return None;
+    }
+    Some((pre_text, command))
+}
+
+/// Validate and execute a CLI command against the policy allowlist.
+/// Returns the (possibly truncated) stdout, or an error message.
+fn execute_tool_command(raw: &str, allowed: &[String]) -> Result<String, String> {
+    let mut parts = raw.split_whitespace();
+    let cmd = parts.next().ok_or_else(|| "empty command".to_string())?;
+    let args: Vec<&str> = parts.collect();
+
+    if !allowed.iter().any(|a| a == cmd) {
+        return Err(format!("command `{cmd}` not in allowlist"));
+    }
+
+    let output = std::process::Command::new(cmd)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("failed to execute `{cmd}`: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let mut result = if stdout.len() > 4000 {
+        format!(
+            "{}...\n(truncated, showing first 4000 of {} bytes)",
+            &stdout[..4000],
+            stdout.len()
+        )
+    } else {
+        stdout.to_string()
+    };
+
+    if !stderr.is_empty() {
+        let stderr_truncated = if stderr.len() > 1000 {
+            format!("{}...(truncated)", &stderr[..1000])
+        } else {
+            stderr.to_string()
+        };
+        result.push_str(&format!("\nstderr: {stderr_truncated}"));
+    }
+
+    Ok(result)
+}
+
 async fn run_chat_repl(
     client: &mut api::pb::brain_service_client::BrainServiceClient<tonic::transport::Channel>,
     max_context: u32,
@@ -683,22 +740,107 @@ async fn run_chat_repl(
 
         let question = input.to_string();
 
-        let response = client
-            .ask(api::pb::AskRequest {
-                question: question.clone(),
-                max_context_items: max_context,
-                history: history.clone(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("ask failed: {e}"))?;
+        // Tool-use loop: allow the LLM to request CLI commands (max 3 per turn).
+        let mut turn_history = history.clone();
+        let mut current_question = question.clone();
+        let mut tool_calls: u32 = 0;
+        let final_answer;
+        let final_sources;
+        let mut turn_tokens: u64 = 0;
+        const MAX_TOOL_CALLS: u32 = 3;
 
-        let resp = response.into_inner();
-        total_tokens += resp.tokens_used;
+        loop {
+            let response = client
+                .ask(api::pb::AskRequest {
+                    question: current_question.clone(),
+                    max_context_items: max_context,
+                    history: turn_history.clone(),
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("ask failed: {e}"))?;
 
-        println!("\nbrain> {}", resp.answer);
-        if !resp.sources_used.is_empty() {
-            println!("       [{}] ({} tok, {} total)\n",
-                resp.sources_used.join(", "), resp.tokens_used, total_tokens);
+            let resp = response.into_inner();
+            turn_tokens += resp.tokens_used;
+
+            // Check for a tool request in the response.
+            if let Some((reasoning, command)) = parse_tool_request(&resp.answer) {
+                if tool_calls >= MAX_TOOL_CALLS {
+                    // Hit the limit — treat remaining text as the answer.
+                    println!("\nbrain> {}", resp.answer);
+                    println!("       (tool call limit reached)");
+                    final_answer = resp.answer.clone();
+                    final_sources = resp.sources_used.clone();
+                    break;
+                }
+
+                // Print the reasoning text if any.
+                if !reasoning.is_empty() {
+                    println!("\nbrain> {reasoning}");
+                }
+                println!("  [tool] executing: {command}");
+
+                match execute_tool_command(command, &allowed_cli_commands) {
+                    Ok(output) => {
+                        // Show a preview (first 3 lines).
+                        for line in output.lines().take(3) {
+                            println!("  [tool] {line}");
+                        }
+                        let line_count = output.lines().count();
+                        if line_count > 3 {
+                            println!("  [tool] ... ({line_count} lines total)");
+                        }
+
+                        // Feed tool output back into conversation.
+                        turn_history.push(api::pb::ChatMessage {
+                            role: "assistant".into(),
+                            content: resp.answer.clone(),
+                        });
+                        turn_history.push(api::pb::ChatMessage {
+                            role: "user".into(),
+                            content: format!(
+                                "Tool output from `{command}`:\n```\n{output}\n```\n\
+                                Now answer my original question using this tool output."
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        println!("  [tool] error: {e}");
+                        turn_history.push(api::pb::ChatMessage {
+                            role: "assistant".into(),
+                            content: resp.answer.clone(),
+                        });
+                        turn_history.push(api::pb::ChatMessage {
+                            role: "user".into(),
+                            content: format!(
+                                "Tool execution failed: {e}\n\
+                                Answer my original question without this tool, or try a different command."
+                            ),
+                        });
+                    }
+                }
+
+                tool_calls += 1;
+                current_question = current_question.clone();
+                continue;
+            }
+
+            // No tool request — this is the final answer.
+            final_answer = resp.answer.clone();
+            final_sources = resp.sources_used.clone();
+            break;
+        }
+
+        total_tokens += turn_tokens;
+
+        println!("\nbrain> {final_answer}");
+        if !final_sources.is_empty() || tool_calls > 0 {
+            let tool_info = if tool_calls > 0 {
+                format!(", {} tool call(s)", tool_calls)
+            } else {
+                String::new()
+            };
+            println!("       [{}] ({} tok, {} total{})\n",
+                final_sources.join(", "), turn_tokens, total_tokens, tool_info);
         } else {
             println!();
         }
@@ -710,17 +852,18 @@ async fn run_chat_repl(
         });
         history.push(api::pb::ChatMessage {
             role: "assistant".to_string(),
-            content: resp.answer.clone(),
+            content: final_answer.clone(),
         });
         exchanges += 1;
 
         // Store each exchange into brain memory.
         let _ = client.store_memory(api::pb::StoreMemoryRequest {
-            content: format!("User asked: {question}\nBrain answered: {}", resp.answer),
+            content: format!("User asked: {question}\nBrain answered: {final_answer}"),
             metadata_json: serde_json::json!({
                 "source": "chat",
                 "type": "exchange",
                 "exchange_number": exchanges,
+                "tool_calls": tool_calls,
             }).to_string(),
         }).await;
 
