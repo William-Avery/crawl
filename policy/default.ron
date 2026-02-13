@@ -50,6 +50,7 @@ PolicyConfig(
         "workspace",
     ],
     allowed_cli_commands: [
+        "ls",
         "uname",
         "df",
         "free",
