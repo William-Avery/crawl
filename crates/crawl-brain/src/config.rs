@@ -36,6 +36,10 @@ pub struct BrainConfig {
     #[serde(default)]
     pub api: ApiConfig,
 
+    /// Scheduler queue settings.
+    #[serde(default)]
+    pub scheduler: SchedulerConfig,
+
     /// Monitoring settings.
     #[serde(default)]
     pub monitor: MonitorConfig,
@@ -192,6 +196,26 @@ impl Default for ApiConfig {
             grpc_web_port: Some(9090),
             metrics_port: 9091,
             portal_port: default_portal_port(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchedulerConfig {
+    /// High-priority queue capacity.
+    pub high_queue_capacity: usize,
+    /// Normal-priority queue capacity.
+    pub normal_queue_capacity: usize,
+    /// Low-priority queue capacity.
+    pub low_queue_capacity: usize,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            high_queue_capacity: 64,
+            normal_queue_capacity: 256,
+            low_queue_capacity: 256,
         }
     }
 }
@@ -450,6 +474,7 @@ impl Default for BrainConfig {
             inference: InferenceConfig::default(),
             storage: StorageConfig::default(),
             api: ApiConfig::default(),
+            scheduler: SchedulerConfig::default(),
             monitor: MonitorConfig::default(),
             autonomy: AutonomyConfig::default(),
         }

@@ -39,9 +39,10 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new(brain: Arc<BrainState>, shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Self {
-        let (high_tx, high_rx) = mpsc::channel(64);
-        let (normal_tx, normal_rx) = mpsc::channel(256);
-        let (low_tx, low_rx) = mpsc::channel(256);
+        let cfg = &brain.config.scheduler;
+        let (high_tx, high_rx) = mpsc::channel(cfg.high_queue_capacity);
+        let (normal_tx, normal_rx) = mpsc::channel(cfg.normal_queue_capacity);
+        let (low_tx, low_rx) = mpsc::channel(cfg.low_queue_capacity);
 
         Self {
             brain,
