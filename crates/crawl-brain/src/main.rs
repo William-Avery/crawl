@@ -10,6 +10,7 @@ mod llm;
 mod memory;
 mod monitor;
 mod policy;
+mod portal;
 mod research;
 mod reward;
 mod sandbox;
@@ -242,6 +243,19 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         }
     });
 
+    // Start the web portal server.
+    let portal_handle = if let Some(port) = brain.config.api.portal_port {
+        let brain_clone = brain.clone();
+        let shutdown = shutdown_rx.clone();
+        Some(tokio::spawn(async move {
+            if let Err(e) = portal::serve(brain_clone, shutdown, port).await {
+                error!("portal server exited with error: {e}");
+            }
+        }))
+    } else {
+        None
+    };
+
     // Start the scheduler.
     let scheduler_handle = tokio::spawn(async move {
         if let Err(e) = scheduler.run().await {
@@ -313,6 +327,9 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
     monitor_handle.abort();
     api_handle.abort();
     scheduler_handle.abort();
+    if let Some(ref h) = portal_handle {
+        h.abort();
+    }
     if let Some(ref h) = curiosity_handle {
         h.abort();
     }
@@ -324,6 +341,9 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
             let _ = monitor_handle.await;
             let _ = api_handle.await;
             let _ = scheduler_handle.await;
+            if let Some(h) = portal_handle {
+                let _ = h.await;
+            }
             if let Some(h) = curiosity_handle {
                 let _ = h.await;
             }

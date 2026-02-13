@@ -176,6 +176,13 @@ pub struct ApiConfig {
     pub grpc_web_port: Option<u16>,
     /// Prometheus metrics port.
     pub metrics_port: u16,
+    /// Optional TCP port for the web portal dashboard.
+    #[serde(default = "default_portal_port")]
+    pub portal_port: Option<u16>,
+}
+
+fn default_portal_port() -> Option<u16> {
+    Some(9080)
 }
 
 impl Default for ApiConfig {
@@ -184,6 +191,7 @@ impl Default for ApiConfig {
             uds_path: PathBuf::from("data/crawl-brain.sock"),
             grpc_web_port: Some(9090),
             metrics_port: 9091,
+            portal_port: default_portal_port(),
         }
     }
 }

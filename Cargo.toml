@@ -46,6 +46,9 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 # HTTP client (for Ollama + research)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
+# HTTP server (portal dashboard)
+axum = "0.8"
+
 # Rate limiting
 governor = "0.8"
 

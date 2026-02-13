@@ -34,6 +34,7 @@ hex = { workspace = true }
 
 # HTTP
 reqwest = { workspace = true }
+axum = { workspace = true }
 
 # Rate limiting
 governor = { workspace = true }

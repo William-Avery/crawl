@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crawl-brain portal</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --border: #30363d;
+  --fg: #c9d1d9;
+  --fg2: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --blue: #58a6ff;
+  --purple: #bc8cff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.6;
+  padding: 16px 24px;
+}
+h1 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.header .meta {
+  color: var(--fg2);
+  font-size: 12px;
+}
+.error-banner {
+  background: #3d1418;
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  display: none;
+  font-size: 12px;
+}
+details {
+  margin: 2px 0;
+  padding-left: 16px;
+}
+details.root {
+  padding-left: 0;
+}
+summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 3px 6px;
+  border-radius: 3px;
+  user-select: none;
+  white-space: nowrap;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: '\25b6';
+  display: inline-block;
+  width: 14px;
+  font-size: 10px;
+  color: var(--fg2);
+  transition: transform 0.1s;
+}
+details[open] > summary::before {
+  transform: rotate(90deg);
+}
+summary:hover { background: var(--bg2); }
+.leaf {
+  padding: 2px 6px 2px 22px;
+  color: var(--fg2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.leaf:hover { background: var(--bg2); }
+.status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.s-completed { background: var(--green); }
+.s-pending { background: var(--yellow); }
+.s-running { background: var(--blue); }
+.s-failed { background: var(--red); }
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.badge-green { background: #1b3a2a; color: var(--green); }
+.badge-yellow { background: #3d2e0a; color: var(--yellow); }
+.badge-blue { background: #0d2847; color: var(--blue); }
+.badge-purple { background: #2a1a47; color: var(--purple); }
+.badge-red { background: #3d1418; color: var(--red); }
+.val { color: var(--accent); }
+.dim { color: var(--fg2); }
+.soul-text {
+  padding: 6px 12px 6px 22px;
+  color: var(--fg2);
+  font-style: italic;
+  max-height: 80px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+.bar-bg {
+  display: inline-block;
+  width: 60px;
+  height: 8px;
+  background: var(--bg2);
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1 id="title">crawl-brain</h1>
+  <span class="meta" id="meta"></span>
+</div>
+<div class="error-banner" id="error"></div>
+<div id="tree"></div>
+
+<script>
+const POLL_MS = 2000;
+let openState = {};
+
+function saveOpen(root) {
+  root.querySelectorAll('details').forEach(d => {
+    if (d.dataset.key) openState[d.dataset.key] = d.open;
+  });
+}
+
+function restoreOpen(root) {
+  root.querySelectorAll('details').forEach(d => {
+    if (d.dataset.key && d.dataset.key in openState) {
+      d.open = openState[d.dataset.key];
+    }
+  });
+}
+
+function ago(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 0) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString('en-GB', { hour12: false });
+}
+
+function fmtUptime(secs) {
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h + 'h ' + m + 'm';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function det(key, summary, children, defaultOpen) {
+  const o = defaultOpen === undefined ? true : defaultOpen;
+  return `<details data-key="${esc(key)}"${o ? ' open' : ''}><summary>${summary}</summary>${children}</details>`;
+}
+
+function leaf(text) {
+  return `<div class="leaf">${text}</div>`;
+}
+
+function statusDot(s) {
+  const cls = 'status s-' + s;
+  return `<span class="${cls}"></span>`;
+}
+
+function badge(text, color) {
+  return `<span class="badge badge-${color}">${esc(text)}</span>`;
+}
+
+function memBar(pct) {
+  const color = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
+  return `<span class="bar-bg"><span class="bar-fill" style="width:${pct.toFixed(0)}%;background:${color}"></span></span>`;
+}
+
+function render(d) {
+  const tree = document.getElementById('tree');
+  saveOpen(tree);
+
+  // Header
+  document.getElementById('title').textContent = 'crawl-brain';
+  document.getElementById('meta').textContent =
+    `v${d.version} | uptime ${fmtUptime(d.uptime_secs)} | EWMA ${d.ewma.toFixed(3)} | think ${d.think_interval_ms}ms`;
+
+  let html = '';
+
+  // Cells
+  {
+    let inner = '';
+    if (d.cells.length === 0) {
+      inner = leaf('<span class="dim">no cells loaded</span>');
+    } else {
+      for (const c of d.cells) {
+        const caps = c.capabilities.length ? c.capabilities.map(x => badge(x, 'blue')).join(' ') : '<span class="dim">none</span>';
+        inner += leaf(`<span class="val">${esc(c.id)}</span> ${caps}`);
+      }
+    }
+    html += det('cells', `Cells <span class="dim">(${d.cells.length})</span>`, inner);
+  }
+
+  // Tasks
+  {
+    const total = d.tasks.completed + d.tasks.pending + d.tasks.running + d.tasks.failed;
+    let parts = [];
+    if (d.tasks.completed) parts.push(`${d.tasks.completed} completed`);
+    if (d.tasks.pending) parts.push(`${d.tasks.pending} pending`);
+    if (d.tasks.running) parts.push(`${d.tasks.running} running`);
+    if (d.tasks.failed) parts.push(`${d.tasks.failed} failed`);
+    const summary = parts.join(', ') || 'none';
+
+    let recent = '';
+    if (d.recent_tasks.length > 0) {
+      let items = '';
+      for (const t of d.recent_tasks) {
+        const timeStr = ago(t.created_at) || fmtTime(t.created_at);
+        items += leaf(
+          `${statusDot(t.status)}<span class="dim">[${esc(t.status)}]</span> ` +
+          `${esc(t.verb)} <span class="val">${esc(t.cell_id)}</span>: ${esc(t.description)} ` +
+          `<span class="dim">(${timeStr})</span>`
+        );
+      }
+      recent = det('tasks-recent', `Recent <span class="dim">(${d.recent_tasks.length})</span>`, items);
+    }
+
+    html += det('tasks', `Tasks <span class="dim">(${summary})</span>`, recent);
+  }
+
+  // Entities
+  {
+    let inner = '';
+    if (d.entities.length === 0) {
+      inner = leaf('<span class="dim">none discovered</span>');
+    } else {
+      for (const e of d.entities) {
+        const desc = e.description ? `: ${esc(e.description)}` : '';
+        inner += leaf(
+          `<span class="val">${esc(e.name)}</span> ` +
+          `${badge(e.kind, 'purple')}${desc} ` +
+          `<span class="dim">[${e.confidence.toFixed(2)}] ${ago(e.last_seen)}</span>`
+        );
+      }
+    }
+    html += det('entities', `Entities <span class="dim">(${d.entities.length})</span>`, inner);
+  }
+
+  // System Metrics
+  if (d.metrics) {
+    const m = d.metrics;
+    const memFreeMB = Math.floor(m.mem_available_kb / 1024);
+    const inner =
+      leaf(`CPU: <span class="val">${m.cpu_load_1m.toFixed(2)}</span> / ${m.cpu_load_5m.toFixed(2)} / ${m.cpu_load_15m.toFixed(2)}`) +
+      leaf(`Memory: <span class="val">${m.mem_used_percent.toFixed(1)}%</span> ${memBar(m.mem_used_percent)} <span class="dim">(${memFreeMB} MB free)</span>`);
+    html += det('metrics', 'System Metrics', inner);
+  }
+
+  // Journal
+  {
+    let inner = '';
+    if (d.journal.length === 0) {
+      inner = leaf('<span class="dim">no events</span>');
+    } else {
+      for (const e of d.journal) {
+        const ts = fmtTime(e.timestamp);
+        const cell = e.cell_id ? ` <span class="val">${esc(e.cell_id)}</span>` : '';
+        inner += leaf(`<span class="dim">${ts}</span> ${esc(e.kind)}${cell}`);
+      }
+    }
+    html += det('journal', `Journal <span class="dim">(${d.journal.length} events)</span>`, inner);
+  }
+
+  // LLM
+  {
+    html += det('llm',
+      `LLM <span class="dim">${esc(d.llm.provider)}, ${d.llm.queries} queries, $${d.llm.budget_spent_usd.toFixed(4)}</span>`,
+      leaf(`Queries: <span class="val">${d.llm.queries}</span>`) +
+      leaf(`Tokens: <span class="val">${d.llm.tokens}</span>`) +
+      leaf(`Budget: <span class="val">$${d.llm.budget_spent_usd.toFixed(4)}</span>`),
+      false
+    );
+  }
+
+  // Memory
+  html += det('memory',
+    `Memory <span class="dim">(${d.memory_count} entries)</span>`,
+    leaf(`Total entries: <span class="val">${d.memory_count}</span>`),
+    false
+  );
+
+  // Wisdom
+  if (d.wisdom) {
+    const w = d.wisdom;
+    let inner = leaf(`Maturity: ${badge(w.maturity, 'green')}`);
+    if (w.entries.length > 0) {
+      for (const e of w.entries) {
+        const kindColor = e.kind === 'constraint' ? 'red' : e.kind === 'pattern' ? 'yellow' : 'blue';
+        inner += leaf(
+          `${badge(e.kind, kindColor)} ${esc(e.content)} ` +
+          `<span class="dim">(${e.confidence.toFixed(2)})</span>`
+        );
+      }
+    } else {
+      inner += leaf('<span class="dim">no entries</span>');
+    }
+    html += det('wisdom', `Wisdom <span class="dim">(${w.entries.length} entries, ${esc(w.maturity)})</span>`, inner);
+  }
+
+  // Soul
+  {
+    const soulPreview = d.soul ? d.soul.substring(0, 120).replace(/\n/g, ' ') + (d.soul.length > 120 ? '...' : '') : 'not set';
+    let inner = `<div class="soul-text">${esc(d.soul || 'No soul file found.')}</div>`;
+    html += det('soul', `Soul <span class="dim">${esc(soulPreview)}</span>`, inner, false);
+  }
+
+  // Scoreboard
+  {
+    let inner = '';
+    if (d.scoreboard.length === 0) {
+      inner = leaf('<span class="dim">no scored tasks</span>');
+    } else {
+      for (const s of d.scoreboard) {
+        inner += leaf(
+          `<span class="val">${s.composite.toFixed(3)}</span> ` +
+          `${esc(s.verb)} ${esc(s.target)} ` +
+          `<span class="dim">N=${s.novelty.toFixed(2)} A=${s.anomaly.toFixed(2)} ` +
+          `C=${s.confidence.toFixed(2)} Act=${s.actionability.toFixed(2)} ` +
+          `E=${s.efficiency.toFixed(2)}</span>`
+        );
+      }
+    }
+    html += det('scoreboard', `Scoreboard <span class="dim">(top ${d.scoreboard.length})</span>`, inner, false);
+  }
+
+  tree.innerHTML = html;
+  restoreOpen(tree);
+}
+
+let errorCount = 0;
+
+async function poll() {
+  try {
+    const resp = await fetch('/api/state');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    render(data);
+    errorCount = 0;
+    document.getElementById('error').style.display = 'none';
+  } catch (e) {
+    errorCount++;
+    const el = document.getElementById('error');
+    el.textContent = `Connection error: ${e.message} (attempt ${errorCount})`;
+    el.style.display = 'block';
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
