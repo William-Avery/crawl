@@ -499,16 +499,18 @@ impl BrainService for BrainServiceImpl {
             let cmd_list = allowed_cmds.allowed_cli_commands.join(", ");
             format!(
                 "\n## Available Tools\n\
-                You can execute CLI commands to gather live system data. To request a command, \
-                include exactly one XML tag in your response:\n\
+                You have the ability to execute CLI commands to gather live system data.\n\
+                To run a command, output exactly one XML tag:\n\n\
                 <tool_exec>command args...</tool_exec>\n\n\
                 Allowed commands: {cmd_list}\n\n\
-                Rules:\n\
-                - Only use tools when live/current data is needed and context above is insufficient.\n\
-                - Include at most ONE <tool_exec> tag per response.\n\
-                - When you use a tool, include brief reasoning text but do NOT include your final answer — \
-                wait for the tool output.\n\
-                - After receiving tool output, give your final answer incorporating the results.\n"
+                IMPORTANT RULES:\n\
+                - When the user asks about current system state (memory, disk, processes, network, etc.), \
+                USE a tool to get live data rather than relying on stale context metrics.\n\
+                - Output at most ONE <tool_exec> tag per response.\n\
+                - When using a tool: write a SHORT reasoning sentence, then the <tool_exec> tag, then STOP. \
+                Do NOT include your final answer in the same response as a tool call.\n\
+                - After you receive tool output, give your final answer using that data.\n\
+                - Only skip tools for questions that don't need live system data (general knowledge, conversation, etc.).\n"
             )
         };
 
