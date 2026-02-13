@@ -939,7 +939,7 @@ fn graduated_budget(verb: &TaskVerb) -> Budget {
         TaskVerb::Identify => Budget {
             time_budget_ms: Some(30_000),
             deadline_at: None,
-            max_tool_calls: 50,
+            max_tool_calls: 100,
             max_bytes_read: 5 * 1024 * 1024,
             max_bytes_written: 0,
             max_network_calls: 0,
