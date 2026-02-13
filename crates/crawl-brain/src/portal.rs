@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::State,
-    http::{header, StatusCode},
+    http::header,
     response::{Html, IntoResponse},
     routing::get,
     Json, Router,
@@ -168,7 +168,7 @@ async fn serve_html() -> impl IntoResponse {
     )
 }
 
-async fn serve_state(State(state): State<PortalState>) -> Result<Json<PortalSnapshot>, StatusCode> {
+async fn serve_state(State(state): State<PortalState>) -> Json<PortalSnapshot> {
     let brain = &state.brain;
     let uptime = state.start_time.elapsed().as_secs();
 
@@ -203,30 +203,7 @@ async fn serve_state(State(state): State<PortalState>) -> Result<Json<PortalSnap
     };
 
     // Recent tasks
-    let recent_tasks = {
-        let db = brain.storage.db.lock();
-        let mut stmt = db
-            .prepare(
-                "SELECT id, verb, cell_id, description, target, status, created_at, \
-                 COALESCE(completed_at, '') FROM tasks ORDER BY created_at DESC LIMIT 20",
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        stmt.query_map([], |row| {
-            Ok(TaskSnapshot {
-                id: row.get(0)?,
-                verb: row.get(1)?,
-                cell_id: row.get(2)?,
-                description: row.get(3)?,
-                target: row.get(4)?,
-                status: row.get(5)?,
-                created_at: row.get(6)?,
-                completed_at: row.get(7)?,
-            })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>()
-    };
+    let recent_tasks = query_recent_tasks(brain);
 
     // System metrics
     let metrics = crate::monitor::collect_metrics_snapshot().ok().map(|s| MetricsSnapshot {
@@ -286,59 +263,10 @@ async fn serve_state(State(state): State<PortalState>) -> Result<Json<PortalSnap
     let soul = std::fs::read_to_string(&brain.config.paths.soul_path).unwrap_or_default();
 
     // Scoreboard
-    let scoreboard = {
-        let db = brain.storage.db.lock();
-        let mut stmt = db
-            .prepare(
-                "SELECT r.task_id, t.verb, t.target, r.composite, r.novelty, r.anomaly, \
-                 r.confidence, r.actionability, r.scored_at, \
-                 COALESCE(r.efficiency, 0.0) \
-                 FROM task_rewards r \
-                 JOIN tasks t ON r.task_id = t.id \
-                 ORDER BY r.composite DESC LIMIT 10",
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        stmt.query_map([], |row| {
-            Ok(ScoreboardSnapshot {
-                task_id: row.get(0)?,
-                verb: row.get(1)?,
-                target: row.get(2)?,
-                composite: row.get(3)?,
-                novelty: row.get(4)?,
-                anomaly: row.get(5)?,
-                confidence: row.get(6)?,
-                actionability: row.get(7)?,
-                scored_at: row.get(8)?,
-                efficiency: row.get(9)?,
-            })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>()
-    };
+    let scoreboard = query_scoreboard(brain);
 
     // Entities
-    let entities = {
-        let db = brain.storage.db.lock();
-        let mut stmt = db
-            .prepare(
-                "SELECT name, kind, COALESCE(description, ''), COALESCE(confidence, 0.0), \
-                 last_seen FROM entities ORDER BY last_seen DESC LIMIT 20",
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        stmt.query_map([], |row| {
-            Ok(EntitySnapshot {
-                name: row.get(0)?,
-                kind: row.get(1)?,
-                description: row.get(2)?,
-                confidence: row.get(3)?,
-                last_seen: row.get(4)?,
-            })
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>()
-    };
+    let entities = query_entities(brain);
 
     // EWMA
     let ewma = brain
@@ -361,7 +289,7 @@ async fn serve_state(State(state): State<PortalState>) -> Result<Json<PortalSnap
         brain.config.autonomy.think_interval_ms
     };
 
-    Ok(Json(PortalSnapshot {
+    Json(PortalSnapshot {
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_secs: uptime,
         ewma,
@@ -382,5 +310,83 @@ async fn serve_state(State(state): State<PortalState>) -> Result<Json<PortalSnap
         soul,
         scoreboard,
         entities,
-    }))
+    })
+}
+
+/// Query recent tasks, returning empty vec on any SQL error.
+fn query_recent_tasks(brain: &BrainState) -> Vec<TaskSnapshot> {
+    let db = brain.storage.db.lock();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT id, verb, cell_id, description, target, status, created_at, \
+         COALESCE(completed_at, '') FROM tasks ORDER BY created_at DESC LIMIT 20",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map([], |row| {
+        Ok(TaskSnapshot {
+            id: row.get(0)?,
+            verb: row.get(1)?,
+            cell_id: row.get(2)?,
+            description: row.get(3)?,
+            target: row.get(4)?,
+            status: row.get(5)?,
+            created_at: row.get(6)?,
+            completed_at: row.get(7)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Query scoreboard, returning empty vec on any SQL error.
+fn query_scoreboard(brain: &BrainState) -> Vec<ScoreboardSnapshot> {
+    let db = brain.storage.db.lock();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT r.task_id, t.verb, t.target, r.composite, r.novelty, r.anomaly, \
+         r.confidence, r.actionability, r.scored_at, \
+         COALESCE(r.efficiency, 0.0) \
+         FROM task_rewards r \
+         JOIN tasks t ON r.task_id = t.id \
+         ORDER BY r.composite DESC LIMIT 10",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map([], |row| {
+        Ok(ScoreboardSnapshot {
+            task_id: row.get(0)?,
+            verb: row.get(1)?,
+            target: row.get(2)?,
+            composite: row.get(3)?,
+            novelty: row.get(4)?,
+            anomaly: row.get(5)?,
+            confidence: row.get(6)?,
+            actionability: row.get(7)?,
+            scored_at: row.get(8)?,
+            efficiency: row.get(9)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Query entities, returning empty vec on any SQL error.
+fn query_entities(brain: &BrainState) -> Vec<EntitySnapshot> {
+    let db = brain.storage.db.lock();
+    let Ok(mut stmt) = db.prepare(
+        "SELECT name, kind, COALESCE(description, ''), COALESCE(confidence, 0.0), \
+         last_seen FROM entities ORDER BY last_seen DESC LIMIT 20",
+    ) else {
+        return vec![];
+    };
+    stmt.query_map([], |row| {
+        Ok(EntitySnapshot {
+            name: row.get(0)?,
+            kind: row.get(1)?,
+            description: row.get(2)?,
+            confidence: row.get(3)?,
+            last_seen: row.get(4)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
 }
