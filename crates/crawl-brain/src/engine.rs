@@ -56,6 +56,7 @@ pub struct CellState {
     pub output_buffer: Vec<u8>,
     pub table: ResourceTable,
     pub subsystems: SubsystemRefs,
+    pub wasi_ctx: wasmtime_wasi::WasiCtx,
 }
 
 impl CellState {
@@ -77,9 +78,25 @@ impl CellState {
             output_buffer: Vec::new(),
             table: ResourceTable::new(),
             subsystems,
+            wasi_ctx: wasmtime_wasi::WasiCtxBuilder::new().build(),
         }
     }
 
+}
+
+impl wasmtime_wasi::IoView for CellState {
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
+}
+
+impl wasmtime_wasi::WasiView for CellState {
+    fn ctx(&mut self) -> &mut wasmtime_wasi::WasiCtx {
+        &mut self.wasi_ctx
+    }
+}
+
+impl CellState {
     fn check_tool_budget(&mut self) -> std::result::Result<(), String> {
         if self.tool_calls_used >= self.budget.max_tool_calls {
             return Err(format!("tool call budget exhausted ({}/{})", self.tool_calls_used, self.budget.max_tool_calls));
@@ -514,15 +531,27 @@ impl PluginEngine {
         let plugin = self.plugins.read().get(cell_id).cloned()
             .ok_or_else(|| anyhow::anyhow!("plugin '{}' not loaded", cell_id))?;
 
+        tracing::debug!(cell_id, "creating WASM store");
         let state = CellState::new(cell_id.to_string(), capabilities, budget, subsystems);
         let mut store = Store::new(&self.engine, state);
         store.epoch_deadline_async_yield_and_update(1);
 
+        tracing::debug!(cell_id, "setting up linker");
         let mut linker = Linker::new(&self.engine);
-        Cell::add_to_linker(&mut linker, |state: &mut CellState| state)?;
+        wasmtime_wasi::add_to_linker_async(&mut linker)
+            .with_context(|| format!("failed to add WASI to linker for {cell_id}"))?;
+        Cell::add_to_linker(&mut linker, |state: &mut CellState| state)
+            .with_context(|| format!("failed to add Cell bindings to linker for {cell_id}"))?;
 
-        let instance = Cell::instantiate_async(&mut store, &plugin.component, &linker).await?;
-        let result = instance.crawl_plugin_plugin_api().call_execute(&mut store, &task).await?;
+        tracing::debug!(cell_id, "instantiating WASM component");
+        let instance = Cell::instantiate_async(&mut store, &plugin.component, &linker).await
+            .with_context(|| format!("failed to instantiate WASM component for {cell_id}"))?;
+
+        tracing::debug!(cell_id, "calling execute");
+        let result = instance.crawl_plugin_plugin_api().call_execute(&mut store, &task).await
+            .with_context(|| format!("WASM execute call failed for {cell_id}"))?;
+
+        tracing::debug!(cell_id, "execute completed");
         Ok(result)
     }
 
@@ -537,17 +566,24 @@ impl PluginEngine {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "wasm") {
                 let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+                let cell_id = stem.strip_prefix("crawl_plugin_").unwrap_or(&stem).to_string();
+                // Request all capabilities — the policy resolver will
+                // grant only what's allowed for this cell_id.
                 let manifest = PluginManifest {
-                    cell_id: stem.clone(), name: stem.clone(), version: "0.1.0".into(),
+                    cell_id: cell_id.clone(), name: cell_id.clone(), version: "0.1.0".into(),
                     requested_capabilities: vec![
-                        Capability::FilesystemRead, Capability::ProcessList,
-                        Capability::LogRead, Capability::JournalEmit,
+                        Capability::FilesystemRead, Capability::FilesystemWrite,
+                        Capability::ProcessList, Capability::LogRead,
+                        Capability::CliExec, Capability::NetworkGet,
+                        Capability::LlmQuery, Capability::MemoryAccess,
+                        Capability::JournalEmit, Capability::MetricsRead,
+                        Capability::InferenceRun,
                     ],
                     wasm_path: path,
                 };
                 match self.load_plugin(manifest) {
                     Ok(()) => count += 1,
-                    Err(e) => tracing::warn!(cell_id = stem, error = %e, "failed to load plugin"),
+                    Err(e) => tracing::warn!(cell_id = cell_id, error = %e, "failed to load plugin"),
                 }
             }
         }

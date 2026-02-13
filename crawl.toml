@@ -12,7 +12,7 @@ soul_path = "data/soul.md"
 
 [ollama]
 base_url = "http://localhost:11434"
-model = "glm-4.7-flash:latest"
+model = "qwen2.5:7b"
 rate_limit_rps = 5.0
 default_max_tokens = 2048
 timeout_ms = 60000
@@ -40,10 +40,10 @@ anomaly_threshold = 0.8
 
 [autonomy]
 enabled = true
-think_interval_ms = 60000
+think_interval_ms = 30000
 max_pending_tasks = 5
 max_tokens_per_think = 1024
-temperature = 0.4
+temperature = 1.0
 allowed_verbs = ["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "BUILD"]
 
 [autonomy.reward]

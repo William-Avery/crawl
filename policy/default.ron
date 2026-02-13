@@ -43,6 +43,7 @@ PolicyConfig(
         "/var/log",
         "/etc/hostname",
         "/etc/os-release",
+        "workspace",
     ],
     allowed_write_paths: [
         "workspace",

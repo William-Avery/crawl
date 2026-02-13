@@ -166,6 +166,7 @@ impl CuriosityLoop {
             .context("curiosity LLM query failed")?;
 
         // Parse response into proposed tasks.
+        tracing::debug!(response = %response.text, "curiosity LLM raw response");
         let proposed = self.parse_proposals(&response.text);
 
         // ── Journal the think cycle with reward metrics ─────────────
@@ -538,7 +539,7 @@ Consider:
 - What knowledge gaps exist that could be filled?
 - Respect learned wisdom — avoid repeating mistakes listed in constraints.
 
-Respond with a JSON array of 0-3 tasks to submit. If nothing interesting stands out, return an empty array []. Don't force investigations — it's ok to wait.
+Respond with a JSON array of 1-3 tasks to submit. You should almost always submit at least one task — there is always something to learn about this system. Only return an empty array [] if you have thoroughly investigated everything recently.
 
 Format: [{{"cell_id": "...", "verb": "...", "description": "...", "target": "...", "hypothesis": "..."}}]
 Respond ONLY with the JSON array, no other text."#,

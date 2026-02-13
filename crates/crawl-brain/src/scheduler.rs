@@ -101,7 +101,7 @@ impl Scheduler {
             let task = queued.task;
             let brain = self.brain.clone();
 
-            // Spawn task execution.
+            // Spawn task execution with panic catching.
             tokio::spawn(async move {
                 let task_id = task.id;
                 let cell_id = task.cell_id.clone();
@@ -135,11 +135,13 @@ impl Scheduler {
 
                 // Execute the task with timeout.
                 let timeout_ms = task.budget.time_budget_ms.unwrap_or(30_000);
+                tracing::debug!(task_id = %task_id, timeout_ms, "starting task execution");
                 let result = tokio::time::timeout(
                     std::time::Duration::from_millis(timeout_ms),
                     execute_task(&brain, &task),
                 )
                 .await;
+                tracing::debug!(task_id = %task_id, "task execution returned");
 
                 match result {
                     Ok(Ok(task_result)) => {

@@ -63,6 +63,19 @@ fn main() -> Result<()> {
         "crawl-brain starting"
     );
 
+    // Install panic hook that uses tracing (tokio::spawn panics go to stderr by default).
+    std::panic::set_hook(Box::new(|info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".into()
+        };
+        let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
+        tracing::error!(payload = %payload, location = %location, "PANIC");
+    }));
+
     // Build the tokio runtime.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -92,9 +105,10 @@ async fn async_main(config: config::BrainConfig) -> Result<()> {
         "config_path": config.daemon.policy_path.display().to_string(),
     }))?;
 
-    // Initialize the WASM engine.
+    // Initialize the WASM engine and load plugins.
     let engine = engine::PluginEngine::new(&config)?;
-    info!("WASM engine initialized");
+    let plugins_loaded = engine.scan_plugins_dir(&config.paths.plugins_dir)?;
+    info!(plugins_loaded, "WASM engine initialized");
 
     // Initialize the Ollama client.
     let ollama = Arc::new(ollama::OllamaClient::new(&config.ollama));
