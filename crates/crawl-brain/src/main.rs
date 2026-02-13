@@ -391,7 +391,8 @@ fn run_client_command(cmd: Command, config_path: &std::path::Path) -> Result<()>
                 }
             }
             Command::Chat { max_context } => {
-                run_chat_repl(&mut client, max_context).await?;
+                let policy = config::load_policy(&config.daemon.policy_path)?;
+                run_chat_repl(&mut client, max_context, policy.allowed_cli_commands).await?;
             }
             Command::Status => {
                 let response = client
@@ -426,6 +427,7 @@ fn run_client_command(cmd: Command, config_path: &std::path::Path) -> Result<()>
 async fn run_chat_repl(
     client: &mut api::pb::brain_service_client::BrainServiceClient<tonic::transport::Channel>,
     max_context: u32,
+    allowed_cli_commands: Vec<String>,
 ) -> Result<()> {
     use std::io::{BufRead, Write};
 
@@ -616,9 +618,7 @@ async fn run_chat_repl(
                 let args: Vec<String> = parts.map(|s| s.to_string()).collect();
 
                 // Validate against the policy allowlist client-side for fast feedback.
-                let allowed = ["uname","df","free","ps","top","lsblk","ip","ss",
-                               "systemctl","journalctl","git"];
-                if !allowed.contains(&cmd.as_str()) {
+                if !allowed_cli_commands.iter().any(|a| a == &cmd) {
                     println!("command not in allowlist: {cmd}\n");
                     continue;
                 }
