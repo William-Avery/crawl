@@ -12,7 +12,7 @@ interface task-types {
         monitor,
         procure,
         maintain,
-        build,
+        train,
         update,
         crud,
     }

@@ -10,7 +10,10 @@ exclude = [
     "crates/crawl-plugin-sdk",
     "crates/crawl-plugin-monitor",
     "crates/crawl-plugin-identify",
-    "crates/crawl-plugin-build",
+    "crates/crawl-plugin-train",
+    "crates/crawl-plugin-procure",
+    "crates/crawl-plugin-maintain",
+    "crates/crawl-plugin-update",
 ]
 
 # Plugin crates target wasm32-wasip2 and are built separately via xtask

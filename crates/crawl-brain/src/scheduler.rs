@@ -239,7 +239,7 @@ fn convert_verb(verb: TaskVerb) -> wit_task_types::TaskVerb {
         TaskVerb::Monitor => wit_task_types::TaskVerb::Monitor,
         TaskVerb::Procure => wit_task_types::TaskVerb::Procure,
         TaskVerb::Maintain => wit_task_types::TaskVerb::Maintain,
-        TaskVerb::Build => wit_task_types::TaskVerb::Build,
+        TaskVerb::Train => wit_task_types::TaskVerb::Train,
         TaskVerb::Update => wit_task_types::TaskVerb::Update,
         TaskVerb::Crud => wit_task_types::TaskVerb::Crud,
     }

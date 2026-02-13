@@ -26,10 +26,34 @@ PolicyConfig(
             journal_emit,
             cli_exec,
         ],
-        "build": [
+        "train": [
             filesystem_read,
             filesystem_write,
             journal_emit,
+        ],
+        "procure": [
+            filesystem_read,
+            process_list,
+            log_read,
+            cli_exec,
+            journal_emit,
+            memory_access,
+            llm_query,
+        ],
+        "maintain": [
+            filesystem_read,
+            filesystem_write,
+            journal_emit,
+            memory_access,
+            metrics_read,
+        ],
+        "update": [
+            filesystem_read,
+            filesystem_write,
+            cli_exec,
+            journal_emit,
+            memory_access,
+            llm_query,
         ],
     },
     allowed_read_paths: [

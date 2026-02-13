@@ -1187,7 +1187,7 @@ fn parse_verb(s: &str) -> Option<TaskVerb> {
         "MONITOR" => Some(TaskVerb::Monitor),
         "PROCURE" => Some(TaskVerb::Procure),
         "MAINTAIN" => Some(TaskVerb::Maintain),
-        "BUILD" => Some(TaskVerb::Build),
+        "TRAIN" => Some(TaskVerb::Train),
         "UPDATE" => Some(TaskVerb::Update),
         "CRUD" => Some(TaskVerb::Crud),
         _ => None,

@@ -46,7 +46,10 @@ fn main() -> Result<()> {
 const PLUGIN_CRATES: &[&str] = &[
     "crates/crawl-plugin-monitor",
     "crates/crawl-plugin-identify",
-    "crates/crawl-plugin-build",
+    "crates/crawl-plugin-train",
+    "crates/crawl-plugin-procure",
+    "crates/crawl-plugin-maintain",
+    "crates/crawl-plugin-update",
 ];
 
 fn build_plugins() -> Result<()> {

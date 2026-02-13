@@ -18,8 +18,8 @@ pub enum TaskVerb {
     Procure,
     /// Keep agent ecosystem healthy (cache pruning, index rebuild, GC, etc).
     Maintain,
-    /// Create new artifacts in sandbox (scripts, parsers, plugins).
-    Build,
+    /// Create new artifacts in sandbox (models, parsers, plugins).
+    Train,
     /// Propose modifications to skills or Brain code.
     Update,
     /// Data operations on agent workspace / permitted dirs / structured stores.
@@ -29,7 +29,7 @@ pub enum TaskVerb {
 impl TaskVerb {
     /// Whether this verb requires elevated approval before execution.
     pub fn requires_approval(&self) -> bool {
-        matches!(self, TaskVerb::Build | TaskVerb::Update)
+        matches!(self, TaskVerb::Train | TaskVerb::Update)
     }
 }
 
@@ -542,7 +542,7 @@ mod tests {
     fn task_verb_approval() {
         assert!(!TaskVerb::Identify.requires_approval());
         assert!(!TaskVerb::Monitor.requires_approval());
-        assert!(TaskVerb::Build.requires_approval());
+        assert!(TaskVerb::Train.requires_approval());
         assert!(TaskVerb::Update.requires_approval());
     }
 

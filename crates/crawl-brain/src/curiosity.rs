@@ -538,7 +538,7 @@ You run on a Jetson Orin (aarch64 Linux). Your job is to be curious about this m
 ## What You Can Do
 You can submit tasks to loaded Cells using these verbs: {verbs}.
 Each task needs: cell_id, verb, description, target, and optionally a hypothesis.
-For PROCURE/MAINTAIN/BUILD tasks, always include a hypothesis explaining what you expect to learn or achieve.
+For PROCURE/MAINTAIN/TRAIN/UPDATE tasks, always include a hypothesis explaining what you expect to learn or achieve.
 
 ## Instructions
 Think about what would be interesting or useful to investigate right now.
@@ -651,7 +651,7 @@ Respond ONLY with the JSON array, no other text."#,
             "MONITOR" => TaskVerb::Monitor,
             "PROCURE" => TaskVerb::Procure,
             "MAINTAIN" => TaskVerb::Maintain,
-            "BUILD" => TaskVerb::Build,
+            "TRAIN" => TaskVerb::Train,
             "UPDATE" => TaskVerb::Update,
             "CRUD" => TaskVerb::Crud,
             other => anyhow::bail!("unknown verb '{other}'"),
@@ -837,7 +837,7 @@ Respond ONLY with the JSON array, no other text."#,
     /// Check whether we should auto-submit a training task this cycle.
     fn should_propose_training(&self) -> bool {
         // Trainer cell must be loaded.
-        if !self.brain.engine.is_loaded("build") {
+        if !self.brain.engine.is_loaded("train") {
             return false;
         }
 
@@ -851,7 +851,7 @@ Respond ONLY with the JSON array, no other text."#,
         let db = self.brain.storage.db.lock();
         let active: i64 = db
             .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE cell_id = 'build' AND status IN ('pending', 'running')",
+                "SELECT COUNT(*) FROM tasks WHERE cell_id = 'train' AND status IN ('pending', 'running')",
                 [],
                 |row| row.get(0),
             )
@@ -863,20 +863,20 @@ Respond ONLY with the JSON array, no other text."#,
         true
     }
 
-    /// Build and submit a BUILD task to the trainer cell.
+    /// Build and submit a TRAIN task to the trainer cell.
     async fn submit_training_task(&self, data_path: &str) -> Result<Uuid> {
         let task_id = Uuid::now_v7();
         let task = Task {
             id: task_id,
-            verb: TaskVerb::Build,
+            verb: TaskVerb::Train,
             description: "Train statistical anomaly model from metrics history".to_string(),
             target: "anomaly_model".to_string(),
             params: serde_json::json!({
                 "source": "autonomy",
                 "training_data_path": data_path,
             }),
-            budget: graduated_budget(&TaskVerb::Build),
-            cell_id: "build".to_string(),
+            budget: graduated_budget(&TaskVerb::Train),
+            cell_id: "train".to_string(),
             created_at: Utc::now(),
             continuation: None,
         };
@@ -965,8 +965,8 @@ fn graduated_budget(verb: &TaskVerb) -> Budget {
             max_bytes_read: 10 * 1024 * 1024,
             max_bytes_written: 1024 * 1024,
             max_network_calls: 0,
-            max_llm_calls: 0,
-            max_tokens_per_call: 0,
+            max_llm_calls: 2,
+            max_tokens_per_call: 512,
             risk_tier: RiskTier::Medium,
         },
         TaskVerb::Maintain => Budget {
@@ -980,12 +980,23 @@ fn graduated_budget(verb: &TaskVerb) -> Budget {
             max_tokens_per_call: 0,
             risk_tier: RiskTier::Medium,
         },
-        TaskVerb::Build => Budget {
+        TaskVerb::Train => Budget {
             time_budget_ms: Some(300_000),
             deadline_at: None,
             max_tool_calls: 500,
             max_bytes_read: 50 * 1024 * 1024,
             max_bytes_written: 20 * 1024 * 1024,
+            max_network_calls: 0,
+            max_llm_calls: 5,
+            max_tokens_per_call: 2048,
+            risk_tier: RiskTier::High,
+        },
+        TaskVerb::Update => Budget {
+            time_budget_ms: Some(120_000),
+            deadline_at: None,
+            max_tool_calls: 200,
+            max_bytes_read: 10 * 1024 * 1024,
+            max_bytes_written: 5 * 1024 * 1024,
             max_network_calls: 0,
             max_llm_calls: 5,
             max_tokens_per_call: 2048,

@@ -92,7 +92,8 @@ impl MaturityLevel {
             verbs.push("MAINTAIN".to_string());
         }
         if *self >= MaturityLevel::Builder {
-            verbs.push("BUILD".to_string());
+            verbs.push("TRAIN".to_string());
+            verbs.push("UPDATE".to_string());
         }
         verbs
     }
@@ -645,7 +646,7 @@ mod tests {
         assert_eq!(ct, vec!["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN"]);
 
         let bld = MaturityLevel::Builder.unlocked_verbs();
-        assert_eq!(bld, vec!["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "BUILD"]);
+        assert_eq!(bld, vec!["IDENTIFY", "MONITOR", "PROCURE", "MAINTAIN", "TRAIN", "UPDATE"]);
     }
 
     #[test]

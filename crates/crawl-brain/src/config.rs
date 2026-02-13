@@ -359,7 +359,7 @@ pub struct MaturityThresholds {
     pub investigator_wisdom_count: u32,
     /// Successful PROCURE task count required to graduate to Caretaker (MAINTAIN unlocked).
     pub caretaker_procure_count: u32,
-    /// Successful MAINTAIN task count required to graduate to Builder (BUILD unlocked).
+    /// Successful MAINTAIN task count required to graduate to Builder (TRAIN unlocked).
     pub builder_maintain_count: u32,
 }
 
@@ -429,7 +429,10 @@ impl Default for AutonomyConfig {
             max_pending_tasks: 5,
             max_tokens_per_think: 1024,
             temperature: 0.4,
-            allowed_verbs: vec!["IDENTIFY".into(), "MONITOR".into()],
+            allowed_verbs: vec![
+                "IDENTIFY".into(), "MONITOR".into(), "PROCURE".into(),
+                "MAINTAIN".into(), "TRAIN".into(), "UPDATE".into(),
+            ],
             reward: RewardConfig::default(),
             soul: SoulConfig::default(),
             wisdom: WisdomConfig::default(),

@@ -1,6 +1,6 @@
 [package]
-name = "crawl-plugin-build"
-description = "Build Cell — computes statistical anomaly models from metrics history"
+name = "crawl-plugin-update"
+description = "Update Cell — proposes modifications to existing files and skills"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
