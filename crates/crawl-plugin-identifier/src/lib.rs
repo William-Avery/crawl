@@ -68,18 +68,50 @@ impl plugin_api::Guest for IdentifierPlugin {
     }
 }
 
+/// Infer a category from the target name using keyword heuristics.
+/// Used as a fallback when the LLM returns "unknown".
+fn infer_category_from_target(target: &str) -> &'static str {
+    let t = target.to_lowercase();
+    if t.contains("process") || t.contains("pid") || t.contains("daemon") || t.contains("workload") {
+        "process"
+    } else if t.contains("service") || t.contains("port") || t.contains("listen") || t.contains("server") {
+        "service"
+    } else if t.contains("config") || t.contains("setting") || t.contains("param") || t.contains("threshold") || t.contains("model") {
+        "config"
+    } else if t.contains("driver") || t.contains("cuda") || t.contains("gpu") || t.contains("thermal") || t.contains("hardware") || t.contains("memory") {
+        "driver"
+    } else if t.contains("log") || t.contains("error") || t.contains("warning") || t.contains("event") || t.contains("pattern") {
+        "log_pattern"
+    } else if t.contains("file") || t.contains("path") || t.contains("directory") {
+        "file"
+    } else {
+        "unknown"
+    }
+}
+
 fn identify_entity(target: &str, description: &str) -> Result<IdentifyResult, String> {
     // First, check if we already have a memory about this entity.
     let memory_results = memory_search(target, 3).unwrap_or_default();
     if let Some(best) = memory_results.first() {
         if best.similarity > 0.85 {
             // We've seen this before — return cached identification.
+            // Try to recover original category from the stored metadata.
+            let cached_category = serde_json::from_str::<serde_json::Value>(&best.metadata)
+                .ok()
+                .and_then(|v| v.get("category").and_then(|c| c.as_str().map(String::from)))
+                .unwrap_or_default();
+            // Use stored category if meaningful, otherwise infer from target name.
+            let category = if cached_category.is_empty() || cached_category == "unknown" || cached_category == "cached" {
+                infer_category_from_target(target).to_string()
+            } else {
+                cached_category
+            };
             return Ok(IdentifyResult {
                 target: target.to_string(),
                 hypothesis: format!("Previously identified: {}", best.content),
                 confidence: best.similarity.min(0.95),
                 evidence: vec![format!("memory match (similarity: {:.2})", best.similarity)],
-                category: "cached".to_string(),
+                category,
                 suggested_followup: vec![],
             });
         }
@@ -96,6 +128,16 @@ fn identify_entity(target: &str, description: &str) -> Result<IdentifyResult, St
                     "Process found: PID={}, name={}, cmdline={}, CPU={:.1}%, MEM={}KB",
                     proc.pid, proc.name, proc.cmdline, proc.cpu_percent, proc.mem_kb
                 ));
+            }
+        }
+    }
+
+    // Search recent logs for mentions of the target.
+    let target_lower = target.to_lowercase();
+    if let Ok(log_lines) = host_tools::read_log("syslog", 50) {
+        for line in &log_lines {
+            if line.to_lowercase().contains(&target_lower) {
+                evidence.push(format!("Log mention: {}", line.trim()));
             }
         }
     }
@@ -134,20 +176,27 @@ Be concise and factual."#,
 
     for line in response.text.lines() {
         let line = line.trim();
-        if let Some(val) = line.strip_prefix("HYPOTHESIS:") {
-            hypothesis = val.trim().to_string();
-        } else if let Some(val) = line.strip_prefix("CONFIDENCE:") {
-            confidence = val.trim().parse().unwrap_or(0.5);
-        } else if let Some(val) = line.strip_prefix("CATEGORY:") {
-            category = val.trim().to_string();
-        } else if let Some(val) = line.strip_prefix("FOLLOWUP:") {
-            suggested_followup = val.split(',').map(|s| s.trim().to_string()).collect();
+        let upper = line.to_uppercase();
+        if let Some(pos) = upper.find("HYPOTHESIS:") {
+            hypothesis = line[pos + "HYPOTHESIS:".len()..].trim().to_string();
+        } else if let Some(pos) = upper.find("CONFIDENCE:") {
+            confidence = line[pos + "CONFIDENCE:".len()..].trim().parse().unwrap_or(0.5);
+        } else if let Some(pos) = upper.find("CATEGORY:") {
+            category = line[pos + "CATEGORY:".len()..].trim().to_string();
+        } else if let Some(pos) = upper.find("FOLLOWUP:") {
+            suggested_followup = line[pos + "FOLLOWUP:".len()..].split(',')
+                .map(|s| s.trim().to_string()).collect();
         }
     }
 
     if hypothesis.is_empty() {
         // Fallback: use the raw response as hypothesis.
         hypothesis = response.text.lines().next().unwrap_or("Unknown entity").to_string();
+    }
+
+    // If the LLM returned "unknown" category, try keyword heuristic on the target name.
+    if category == "unknown" {
+        category = infer_category_from_target(target).to_string();
     }
 
     Ok(IdentifyResult {
