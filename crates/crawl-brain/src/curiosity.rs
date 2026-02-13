@@ -230,6 +230,7 @@ impl CuriosityLoop {
                 self.reward_engine.update_ewma(cycle_avg_composite);
             }
             self.reward_engine.tick_cycle();
+            let _ = self.brain.storage.kv_put("reward_ewma", &self.reward_engine.ewma().to_le_bytes());
             return Ok(());
         }
 
@@ -291,6 +292,7 @@ impl CuriosityLoop {
                 self.reward_engine.update_ewma(cycle_avg_composite);
             }
             self.reward_engine.tick_cycle();
+            let _ = self.brain.storage.kv_put("reward_ewma", &self.reward_engine.ewma().to_le_bytes());
 
             // Run LLM reflection if due.
             match self.reward_engine.maybe_reflect().await {
@@ -888,7 +890,18 @@ Respond ONLY with the JSON array, no other text."#,
 /// Compute a budget appropriate for the verb's risk tier.
 fn graduated_budget(verb: &TaskVerb) -> Budget {
     match verb {
-        TaskVerb::Identify | TaskVerb::Monitor => Budget {
+        TaskVerb::Identify => Budget {
+            time_budget_ms: Some(30_000),
+            deadline_at: None,
+            max_tool_calls: 50,
+            max_bytes_read: 5 * 1024 * 1024,
+            max_bytes_written: 0,
+            max_network_calls: 0,
+            max_llm_calls: 2,
+            max_tokens_per_call: 512,
+            risk_tier: RiskTier::Low,
+        },
+        TaskVerb::Monitor => Budget {
             time_budget_ms: Some(30_000),
             deadline_at: None,
             max_tool_calls: 50,

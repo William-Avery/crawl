@@ -2,7 +2,7 @@
 #![allow(unused)]
 
 use anyhow::{bail, Context, Result};
-use crawl_types::{Capability, FeatureFlags, PolicyConfig};
+use crawl_types::{Capability, FeatureFlags, HumanApprovalAction, PolicyConfig, ProhibitedAction};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::HashSet;
 use std::path::Path;
@@ -148,6 +148,53 @@ pub fn is_category_blocked(category: &str, policy: &PolicyConfig) -> bool {
     policy.blocked_categories.iter().any(|c| c == category)
 }
 
+/// Check whether an action is absolutely prohibited.
+/// Prohibited actions have NO override, NO escalation path, NO exception.
+/// Returns the prohibition if blocked, None if not prohibited.
+pub fn check_prohibited(action: ProhibitedAction, policy: &PolicyConfig) -> Option<ProhibitedAction> {
+    if policy.prohibited_actions.contains(&action) {
+        tracing::warn!(action = ?action, "PROHIBITED action attempted — permanently blocked");
+        Some(action)
+    } else {
+        None
+    }
+}
+
+/// Check whether an action requires human approval.
+/// Returns true if the action needs approval before execution.
+pub fn requires_human_approval(action: HumanApprovalAction, policy: &PolicyConfig) -> bool {
+    let needed = policy.human_approval_required.contains(&action);
+    if needed {
+        tracing::info!(action = ?action, "action requires human approval");
+    }
+    needed
+}
+
+/// Validate that a proposed action is neither prohibited nor unapproved.
+/// Returns Ok(()) if the action can proceed, Err with reason if not.
+pub fn validate_action_gate(
+    prohibited_check: Option<ProhibitedAction>,
+    approval_check: Option<HumanApprovalAction>,
+    has_approval: bool,
+    policy: &PolicyConfig,
+) -> Result<()> {
+    // Absolute prohibitions — no override possible.
+    if let Some(action) = prohibited_check {
+        if check_prohibited(action, policy).is_some() {
+            bail!("action {:?} is permanently prohibited by policy", action);
+        }
+    }
+
+    // Human approval gate.
+    if let Some(action) = approval_check {
+        if requires_human_approval(action, policy) && !has_approval {
+            bail!("action {:?} requires human approval", action);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +231,8 @@ mod tests {
             allowed_cli_commands: vec!["uname".into(), "df".into()],
             allowed_network_domains: vec!["docs.rs".into(), "crates.io".into()],
             blocked_categories: vec!["banking".into()],
+            blocked_domains: vec![],
+            ..PolicyConfig::default()
         }
     }
 
@@ -255,5 +304,60 @@ mod tests {
         assert!(is_domain_allowed("docs.rs", &policy));
         assert!(is_domain_allowed("sub.docs.rs", &policy));
         assert!(!is_domain_allowed("evil.com", &policy));
+    }
+
+    #[test]
+    fn prohibited_actions_enforced() {
+        let policy = test_policy();
+        // Financial transactions are always prohibited.
+        assert!(check_prohibited(ProhibitedAction::FinancialTransaction, &policy).is_some());
+        assert!(check_prohibited(ProhibitedAction::InfrastructureControl, &policy).is_some());
+        assert!(check_prohibited(ProhibitedAction::LegalSubmission, &policy).is_some());
+    }
+
+    #[test]
+    fn human_approval_enforced() {
+        let policy = test_policy();
+        assert!(requires_human_approval(HumanApprovalAction::Purchase, &policy));
+        assert!(requires_human_approval(HumanApprovalAction::CredentialUsage, &policy));
+        assert!(requires_human_approval(HumanApprovalAction::EmailSending, &policy));
+    }
+
+    #[test]
+    fn validate_action_gate_blocks_prohibited() {
+        let policy = test_policy();
+        let result = validate_action_gate(
+            Some(ProhibitedAction::FinancialTransaction),
+            None,
+            false,
+            &policy,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("permanently prohibited"));
+    }
+
+    #[test]
+    fn validate_action_gate_blocks_unapproved() {
+        let policy = test_policy();
+        let result = validate_action_gate(
+            None,
+            Some(HumanApprovalAction::Purchase),
+            false, // no approval
+            &policy,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("requires human approval"));
+    }
+
+    #[test]
+    fn validate_action_gate_allows_approved() {
+        let policy = test_policy();
+        let result = validate_action_gate(
+            None,
+            Some(HumanApprovalAction::Purchase),
+            true, // has approval
+            &policy,
+        );
+        assert!(result.is_ok());
     }
 }

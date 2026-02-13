@@ -216,7 +216,8 @@ impl crawl::plugin::host_tools::Host for CellState {
             "syslog" => "/var/log/syslog",
             "kern" => "/var/log/kern.log",
             "dmesg" => "/var/log/dmesg",
-            other => other,
+            other if std::path::Path::new(other).exists() => other,
+            _ => "/var/log/syslog", // Unknown source names fall back to syslog.
         };
         match std::fs::read_to_string(log_path) {
             Ok(content) => {

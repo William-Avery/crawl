@@ -27,6 +27,24 @@ service BrainService {
 
     // Research.
     rpc Research(ResearchRequest) returns (ResearchResponse);
+
+    // Conversational query — synthesizes answer from all subsystems.
+    rpc Ask(AskRequest) returns (AskResponse);
+
+    // Comprehensive brain status dashboard.
+    rpc GetBrainStatus(GetBrainStatusRequest) returns (GetBrainStatusResponse);
+
+    // Read the soul file.
+    rpc GetSoul(GetSoulRequest) returns (GetSoulResponse);
+
+    // Query wisdom entries.
+    rpc GetWisdom(GetWisdomRequest) returns (GetWisdomResponse);
+
+    // Query discovered entities.
+    rpc GetEntities(GetEntitiesRequest) returns (GetEntitiesResponse);
+
+    // Query the investigation scoreboard.
+    rpc GetScoreboard(GetScoreboardRequest) returns (GetScoreboardResponse);
 }
 
 // ── Health ──────────────────────────────────────────────────────────
@@ -190,4 +208,121 @@ message ResearchResponse {
     double confidence = 3;
     repeated string sources = 4;
     bool tainted = 5;
+}
+
+// ── Ask (Conversational) ──────────────────────────────────────────
+
+message ChatMessage {
+    string role = 1;    // "user" or "assistant"
+    string content = 2;
+}
+
+message AskRequest {
+    string question = 1;
+    uint32 max_context_items = 2; // Per-source cap (default 10).
+    repeated ChatMessage history = 3; // Prior conversation turns.
+}
+
+message AskResponse {
+    string answer = 1;
+    repeated string sources_used = 2;
+    uint64 tokens_used = 3;
+}
+
+// ── Brain Status ──────────────────────────────────────────────────
+
+message GetBrainStatusRequest {}
+
+message GetBrainStatusResponse {
+    string version = 1;
+    uint64 uptime_secs = 2;
+    string maturity_level = 3;
+    uint32 tasks_pending = 4;
+    uint32 tasks_completed = 5;
+    uint32 tasks_failed = 6;
+    uint64 entity_count = 7;
+    uint32 wisdom_count = 8;
+    uint64 memory_count = 9;
+    uint64 llm_queries = 10;
+    uint64 llm_tokens = 11;
+    double llm_budget_spent_usd = 12;
+    string llm_primary_provider = 13;
+    string soul_summary = 14;
+    double ewma = 15;
+    uint64 think_interval_ms = 16;
+    uint32 loaded_cells = 17;
+}
+
+// ── Soul ──────────────────────────────────────────────────────────
+
+message GetSoulRequest {}
+
+message GetSoulResponse {
+    string content = 1;
+}
+
+// ── Wisdom ────────────────────────────────────────────────────────
+
+message GetWisdomRequest {
+    string kind_filter = 1; // Optional: filter by kind.
+}
+
+message GetWisdomResponse {
+    repeated WisdomEntryInfo entries = 1;
+    string maturity_level = 2;
+    repeated string effective_verbs = 3;
+}
+
+message WisdomEntryInfo {
+    string id = 1;
+    string kind = 2;
+    string content = 3;
+    double confidence = 4;
+    uint32 times_confirmed = 5;
+    uint32 times_contradicted = 6;
+    repeated string tags = 7;
+    string created_at = 8;
+}
+
+// ── Entities ──────────────────────────────────────────────────────
+
+message GetEntitiesRequest {
+    uint32 limit = 1;
+}
+
+message GetEntitiesResponse {
+    repeated EntityInfo entities = 1;
+}
+
+message EntityInfo {
+    string id = 1;
+    string name = 2;
+    string kind = 3;
+    string description = 4;
+    double confidence = 5;
+    string first_seen = 6;
+    string last_seen = 7;
+}
+
+// ── Scoreboard ────────────────────────────────────────────────────
+
+message GetScoreboardRequest {
+    uint32 limit = 1;
+}
+
+message GetScoreboardResponse {
+    repeated ScoreboardEntry entries = 1;
+    double ewma = 2;
+}
+
+message ScoreboardEntry {
+    string task_id = 1;
+    string verb = 2;
+    string target = 3;
+    double novelty = 4;
+    double anomaly = 5;
+    double confidence = 6;
+    double actionability = 7;
+    double composite = 8;
+    string scored_at = 9;
 }

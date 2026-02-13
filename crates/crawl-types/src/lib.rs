@@ -220,6 +220,68 @@ pub enum Capability {
     InferenceRun,
 }
 
+/// Actions that are absolutely prohibited — no capability exists, no override possible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProhibitedAction {
+    /// No autonomous financial transactions of any kind.
+    FinancialTransaction,
+    /// No autonomous identity authentication or login.
+    IdentityAuthentication,
+    /// No autonomous legal submissions, filings, or signatures.
+    LegalSubmission,
+    /// No autonomous infrastructure control (SCADA, power grid, IoT).
+    InfrastructureControl,
+    /// No autonomous medical record access or modification.
+    MedicalRecordAccess,
+    /// No autonomous weapon/ammunition procurement.
+    WeaponProcurement,
+    /// No autonomous surveillance tool operation.
+    SurveillanceOperation,
+}
+
+/// Actions that require explicit human approval before execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanApprovalAction {
+    /// Any purchase or payment.
+    Purchase,
+    /// Any public posting (social media, forums, etc).
+    PublicPosting,
+    /// Any file upload to external services.
+    FileUpload,
+    /// Any email or message sending.
+    EmailSending,
+    /// Any use of stored credentials.
+    CredentialUsage,
+    /// Code deployment to production.
+    CodeDeployment,
+    /// System configuration changes.
+    SystemConfigChange,
+}
+
+/// Autonomous allowed actions — no approval needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowedAutonomousAction {
+    /// Read-only public web research.
+    PublicResearch,
+    /// Open data retrieval (APIs, public datasets).
+    OpenDataRetrieval,
+    /// Reading documentation and man pages.
+    DocumentationReading,
+    /// Accessing academic resources (arxiv, papers).
+    AcademicResources,
+    /// Local filesystem reads within policy scope.
+    ScopedFileRead,
+    /// Local system observation (metrics, logs).
+    SystemObservation,
+    /// Writing to agent-owned workspace.
+    WorkspaceWrite,
+    /// Running allowlisted CLI commands.
+    AllowlistedCommands,
+}
+
 /// Policy configuration loaded from RON file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyConfig {
@@ -237,6 +299,18 @@ pub struct PolicyConfig {
     pub allowed_network_domains: Vec<String>,
     /// Blocked categories (permanently denied).
     pub blocked_categories: Vec<String>,
+    /// Blocked domains (never fetch from these).
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
+    /// Absolute prohibitions — these actions can never be performed.
+    #[serde(default)]
+    pub prohibited_actions: Vec<ProhibitedAction>,
+    /// Actions requiring human approval before execution.
+    #[serde(default)]
+    pub human_approval_required: Vec<HumanApprovalAction>,
+    /// Actions the system may perform autonomously.
+    #[serde(default)]
+    pub allowed_autonomous: Vec<AllowedAutonomousAction>,
 }
 
 impl Default for PolicyConfig {
@@ -265,6 +339,35 @@ impl Default for PolicyConfig {
                 "payment_processor".into(),
                 "tax_portal".into(),
                 "login_flow".into(),
+            ],
+            blocked_domains: vec![],
+            prohibited_actions: vec![
+                ProhibitedAction::FinancialTransaction,
+                ProhibitedAction::IdentityAuthentication,
+                ProhibitedAction::LegalSubmission,
+                ProhibitedAction::InfrastructureControl,
+                ProhibitedAction::MedicalRecordAccess,
+                ProhibitedAction::WeaponProcurement,
+                ProhibitedAction::SurveillanceOperation,
+            ],
+            human_approval_required: vec![
+                HumanApprovalAction::Purchase,
+                HumanApprovalAction::PublicPosting,
+                HumanApprovalAction::FileUpload,
+                HumanApprovalAction::EmailSending,
+                HumanApprovalAction::CredentialUsage,
+                HumanApprovalAction::CodeDeployment,
+                HumanApprovalAction::SystemConfigChange,
+            ],
+            allowed_autonomous: vec![
+                AllowedAutonomousAction::PublicResearch,
+                AllowedAutonomousAction::OpenDataRetrieval,
+                AllowedAutonomousAction::DocumentationReading,
+                AllowedAutonomousAction::AcademicResources,
+                AllowedAutonomousAction::ScopedFileRead,
+                AllowedAutonomousAction::SystemObservation,
+                AllowedAutonomousAction::WorkspaceWrite,
+                AllowedAutonomousAction::AllowlistedCommands,
             ],
         }
     }
@@ -409,6 +512,17 @@ mod tests {
         assert!(!p.features.credentials_access);
         assert!(p.features.self_update);
         assert_eq!(p.blocked_categories.len(), 6);
+        // All absolute prohibitions are present by default.
+        assert_eq!(p.prohibited_actions.len(), 7);
+        assert!(p.prohibited_actions.contains(&ProhibitedAction::FinancialTransaction));
+        assert!(p.prohibited_actions.contains(&ProhibitedAction::InfrastructureControl));
+        // All human-approval gates are present by default.
+        assert_eq!(p.human_approval_required.len(), 7);
+        assert!(p.human_approval_required.contains(&HumanApprovalAction::Purchase));
+        assert!(p.human_approval_required.contains(&HumanApprovalAction::CredentialUsage));
+        // Autonomous actions are defined.
+        assert_eq!(p.allowed_autonomous.len(), 8);
+        assert!(p.allowed_autonomous.contains(&AllowedAutonomousAction::PublicResearch));
     }
 
     #[test]

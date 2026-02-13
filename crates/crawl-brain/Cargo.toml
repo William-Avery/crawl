@@ -75,6 +75,12 @@ dashmap = { workspace = true }
 arc-swap = { workspace = true }
 notify = { workspace = true }
 
+# URL encoding
+urlencoding = "2"
+
+# Regex (lightweight, no proc-macro)
+regex-lite = "0.1"
+
 # Sandbox
 landlock = { workspace = true }
 

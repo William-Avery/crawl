@@ -1,6 +1,6 @@
 PolicyConfig(
     features: FeatureFlags(
-        network: false,
+        network: true,
         cli_exec: true,
         ui_automation: false,
         credentials_access: false,
@@ -60,7 +60,48 @@ PolicyConfig(
         "systemctl",
         "journalctl",
     ],
-    allowed_network_domains: [],
+    allowed_network_domains: [
+        // Reference / encyclopedic
+        "wikipedia.org",
+        "en.wikipedia.org",
+        "wiki.archlinux.org",
+        // Tech Q&A
+        "stackoverflow.com",
+        "superuser.com",
+        "askubuntu.com",
+        "serverfault.com",
+        "unix.stackexchange.com",
+        // Code / docs
+        "github.com",
+        "docs.kernel.org",
+        "man7.org",
+        "docs.rs",
+        "crates.io",
+        "doc.rust-lang.org",
+        "linux.die.net",
+        // NVIDIA / hardware
+        "developer.nvidia.com",
+        "docs.nvidia.com",
+        "forums.developer.nvidia.com",
+        // Academic
+        "arxiv.org",
+        "scholar.google.com",
+        // Public government info (READ-ONLY — never submit forms, file claims, or authenticate)
+        "data.gov",
+        "census.gov",
+        "bls.gov",
+        "nist.gov",
+        "nvd.nist.gov",
+        "cve.org",
+        "nasa.gov",
+        "weather.gov",
+        "usgs.gov",
+        "noaa.gov",
+        "congress.gov",
+        "govinfo.gov",
+        "loc.gov",
+        "whitehouse.gov",
+    ],
     blocked_categories: [
         "banking",
         "brokerage",
@@ -68,5 +109,176 @@ PolicyConfig(
         "payment_processor",
         "tax_portal",
         "login_flow",
+        "form_submission",
+        "document_signing",
+        "authentication_flow",
+        "claim_filing",
+        "scada_system",
+        "power_grid",
+        "medical_records",
+        "industrial_automation",
+        "iot_device_control",
+        "ammunition_ordering",
+        "controlled_chemicals",
+        "drone_procurement",
+        "surveillance_tools",
+    ],
+    blocked_domains: [
+        // ── Online Banking Portals ──────────────────────────────
+        "chase.com", "bankofamerica.com", "wellsfargo.com", "citi.com", "citibank.com",
+        "usbank.com", "capitalone.com", "tdbank.com", "pnc.com", "hsbc.com",
+        "barclays.com", "ally.com", "discover.com", "marcus.com", "sofi.com",
+        "chime.com", "synchrony.com", "navyfederal.org", "usaa.com", "regions.com",
+        "keybank.com", "fifththird.com", "citizensbank.com", "bbt.com", "truist.com",
+        "huntington.com", "santanderbank.com", "bmo.com", "rbc.com", "scotiabank.com",
+        "td.com", "cibc.com", "nab.com.au", "commbank.com.au", "anz.com.au",
+        "westpac.com.au", "lloydsbank.com", "natwest.com", "halifax.co.uk",
+        "monzo.com", "revolut.com", "n26.com", "bunq.com",
+
+        // ── Payment Processors ──────────────────────────────────
+        "paypal.com", "venmo.com", "stripe.com", "square.com", "squareup.com",
+        "braintreepayments.com", "adyen.com", "worldpay.com", "authorize.net",
+        "2checkout.com", "klarna.com", "afterpay.com", "affirm.com", "sezzle.com",
+        "zelle.com", "wise.com", "remitly.com", "xoom.com", "skrill.com",
+        "neteller.com", "cashapp.com", "googlepay.com", "apple.com/apple-pay",
+        "checkout.shopify.com", "pay.amazon.com", "bill.com",
+
+        // ── Brokerage / Investment ──────────────────────────────
+        "robinhood.com", "schwab.com", "fidelity.com", "vanguard.com",
+        "etrade.com", "tdameritrade.com", "interactivebrokers.com",
+        "merrilledge.com", "ally.com/invest", "sofi.com/invest",
+        "webull.com", "tastyworks.com", "tastytrade.com", "tradestation.com",
+        "firstrade.com", "goldmansachs.com", "morganstanley.com", "jpmorgan.com",
+        "betterment.com", "wealthfront.com", "acorns.com", "stash.com",
+        "m1finance.com", "personalcapital.com", "fundrise.com",
+
+        // ── Crypto Exchanges ────────────────────────────────────
+        "coinbase.com", "binance.com", "binance.us", "kraken.com", "gemini.com",
+        "crypto.com", "ftx.com", "bitfinex.com", "bitstamp.com", "kucoin.com",
+        "gate.io", "okx.com", "huobi.com", "bybit.com", "bittrex.com",
+        "poloniex.com", "blockchain.com", "uphold.com", "nexo.io",
+        "celsius.network", "blockfi.com", "uniswap.org", "opensea.io",
+
+        // ── Loan / Credit Portals ───────────────────────────────
+        "lendingclub.com", "prosper.com", "upstart.com", "avant.com",
+        "lendingtree.com", "nerdwallet.com/apply", "creditkarma.com/apply",
+        "rocketmortgage.com", "quickenloans.com", "better.com", "loandepot.com",
+        "freedommortgage.com", "figure.com", "earnest.com", "commonbond.co",
+        "navient.com", "salliemae.com", "nelnet.com", "mohela.com",
+        "credible.com", "lightstream.com", "marcus.com/loans",
+        "annualcreditreport.com", "experian.com", "equifax.com", "transunion.com",
+
+        // ── Government Interactive Portals (no forms/auth) ──────
+        // Public .gov info is allowed via allowlist; these are blocked
+        // because they involve forms, filing, authentication, or claims.
+        "irs.gov", "ssa.gov", "login.gov", "id.me",
+        "healthcare.gov", "studentaid.gov", "fafsa.gov",
+        "uscis.gov", "e-verify.gov", "usajobs.gov",
+        "sam.gov", "grants.gov", "sba.gov/apply",
+        "pay.gov", "fiscal.treasury.gov",
+        ".mil",
+
+        // ── Mature / Adult Content ──────────────────────────────
+        "pornhub.com", "xvideos.com", "xhamster.com", "xnxx.com",
+        "onlyfans.com", "chaturbate.com", "redtube.com", "youporn.com",
+        "tube8.com", "spankbang.com", "brazzers.com", "bangbros.com",
+        "naughtyamerica.com", "realitykings.com", "livejasmin.com",
+        "stripchat.com", "cam4.com", "bongacams.com", "myfreecams.com",
+        "manyvids.com", "clips4sale.com", "fansly.com", "porntrex.com",
+
+        // ── Auth / Login Flows ──────────────────────────────────
+        "accounts.google.com", "login.microsoftonline.com", "login.yahoo.com",
+        "login.live.com", "appleid.apple.com", "sso.amazon.com",
+
+        // ── SCADA / Industrial Control Systems ──────────────────
+        // PERMANENTLY BLOCKED — never access under any circumstances.
+        "scadabr.com", "inductiveautomation.com", "ignitionplatform.com",
+        "rapidscada.org", "openscada.org", "scadaengine.com",
+        "vtscada.com", "tatsoft.com", "factorytalk.com",
+        "wonderware.com", "aveva.com/monitor", "iconics.com",
+        "ge.com/digital/scada", "siemens.com/wincc", "schneider-electric.com/ecostruxure",
+        "abb.com/ability", "honeywell.com/forge", "emerson.com/deltav",
+        "yokogawa.com/centum", "rockwellautomation.com",
+
+        // ── Power Grid / Energy Portals ─────────────────────────
+        "oasis.oati.com", "misoenergy.org/portal", "pjm.com/markets",
+        "caiso.com", "ercot.com", "spp.org", "nyiso.com",
+        "nerc.com", "gridstatus.io/control",
+
+        // ── Medical Record Systems ──────────────────────────────
+        "mychart.com", "epic.com", "cerner.com", "meditech.com",
+        "allscripts.com", "athenahealth.com", "eclinicalworks.com",
+        "drchrono.com", "kareo.com", "nextgen.com", "practicesuite.com",
+        "healthfusion.com", "patientfusion.com", "patientportal.com",
+        "followmyhealth.com", "healow.com", "myhealth.va.gov",
+
+        // ── IoT Device Control Panels ───────────────────────────
+        "home-assistant.io/api", "hubitat.com/hub", "smartthings.com/api",
+        "tuya.com/cloud", "ifttt.com/trigger", "blynk.io/api",
+        "thingsboard.io", "losant.com", "particle.io/console",
+        "balena.io/dashboard", "hologram.io/dashboard",
+
+        // ── Ammunition / Firearms Ordering ──────────────────────
+        // Blocked even if legal — no procurement capability.
+        "ammoseek.com", "luckygunner.com", "bulkammo.com", "sgammo.com",
+        "targetsportsusa.com", "ammo.com", "natchezss.com", "palmettostatearmory.com",
+        "brownells.com", "midwayusa.com", "budsgunshop.com", "gunbroker.com",
+        "cheaperthandirt.com", "grabagun.com", "sportsmansguide.com",
+        "academy.com/firearms", "basspro.com/firearms", "cabelas.com/firearms",
+
+        // ── Controlled Chemical Purchases ───────────────────────
+        "sigmaaldrich.com", "fishersci.com", "thomassci.com", "carolina.com",
+        "vwr.com", "alfa.com", "acros.com", "tcichemicals.com",
+        "spectrumchemical.com", "chemworld.com", "laballey.com",
+        "loudwolf.com", "duda.com", "bulkapothecary.com",
+
+        // ── Drone Procurement Systems ───────────────────────────
+        "dji.com/shop", "store.dji.com", "skydio.com/shop", "autelrobotics.com/shop",
+        "getfpv.com", "racedayquads.com", "rotorbuilds.com",
+        "dronenerds.com", "bhphotovideo.com/drones", "adorama.com/drones",
+
+        // ── Surveillance Tools / Spyware ────────────────────────
+        "cellebrite.com", "nsogroup.com", "hacking-team.com",
+        "gamma-international.de", "trovicor.com", "utimaco.com",
+        "ss8.com", "verint.com", "nice.com/engage", "geopoliticalmonitor.com",
+        "spytech-web.com", "flexispy.com", "mspy.com", "cocospy.com",
+        "spyic.com", "minspy.com", "spyzie.com", "hovwatch.com",
+        "thetruthspy.com", "eyezy.com", "webwatcher.com",
+    ],
+    // ── Absolute Prohibitions ─────────────────────────────────
+    // These actions can NEVER be performed. No override. No escalation.
+    // No capability exists for these actions in the system.
+    prohibited_actions: [
+        financial_transaction,     // No autonomous purchases, payments, transfers
+        identity_authentication,   // No autonomous login, auth, identity verification
+        legal_submission,          // No autonomous filings, claims, signatures, contracts
+        infrastructure_control,    // No autonomous SCADA, power grid, IoT device control
+        medical_record_access,     // No autonomous medical record access or modification
+        weapon_procurement,        // No autonomous ammunition, firearms, explosives ordering
+        surveillance_operation,    // No autonomous surveillance tool deployment
+    ],
+    // ── Human Approval Required ───────────────────────────────
+    // These actions require explicit human approval before execution.
+    // The system must pause and wait for confirmation.
+    human_approval_required: [
+        purchase,              // Any purchase or payment
+        public_posting,        // Any public posting (social media, forums)
+        file_upload,           // Any file upload to external services
+        email_sending,         // Any email or message sending
+        credential_usage,      // Any use of stored credentials
+        code_deployment,       // Code deployment to production
+        system_config_change,  // System configuration changes
+    ],
+    // ── Allowed Autonomous Actions ────────────────────────────
+    // These actions may be performed without human approval.
+    allowed_autonomous: [
+        public_research,       // Read-only public web research
+        open_data_retrieval,   // Open data APIs and public datasets
+        documentation_reading, // Documentation, man pages, help files
+        academic_resources,    // Academic papers, arxiv, conferences
+        scoped_file_read,      // Local filesystem reads within policy scope
+        system_observation,    // Metrics, logs, process lists
+        workspace_write,       // Writing to agent-owned workspace only
+        allowlisted_commands,  // Running allowlisted CLI commands
     ],
 )
